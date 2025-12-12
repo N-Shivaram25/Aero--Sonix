@@ -36,3 +36,32 @@ export const protectRoute = async (req, res, next) => {
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
+export const optionalAuth = async (req, res, next) => {
+  try {
+    const token = req.cookies.jwt;
+    if (!token) {
+      req.user = null;
+      return next();
+    }
+
+    if (!process.env.JWT_SECRET_KEY) {
+      return res.status(500).json({ message: "Server misconfigured - JWT secret missing" });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
+    } catch (e) {
+      req.user = null;
+      return next();
+    }
+
+    const user = await User.findById(decoded.userId).select("-password");
+    req.user = user || null;
+    return next();
+  } catch (error) {
+    console.log("Error in optionalAuth middleware", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+};

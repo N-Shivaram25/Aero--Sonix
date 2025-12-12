@@ -94,6 +94,10 @@ app.get("/favicon.ico", (req, res) => {
   res.status(204).end();
 });
 
+app.get("/favicon.png", (req, res) => {
+  res.status(204).end();
+});
+
 if (process.env.NODE_ENV === "production") {
   const distDir = path.join(__dirname, "../frontend/dist");
   const indexHtml = path.join(distDir, "index.html");
