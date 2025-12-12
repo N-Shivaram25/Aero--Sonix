@@ -26,6 +26,8 @@ const frontendEnvOrigins = (process.env.FRONTEND_URL || "")
   .map(normalizeOrigin)
   .filter(Boolean);
 
+const allowVercelFallback = frontendEnvOrigins.length === 0;
+
 const allowedOrigins = [
   ...frontendEnvOrigins,
   "http://localhost:5173",
@@ -38,6 +40,16 @@ const corsOptions = {
     if (!origin) return callback(null, true);
     const normalized = normalizeOrigin(origin);
     if (allowedOrigins.includes(normalized)) return callback(null, true);
+    if (allowVercelFallback) {
+      try {
+        const { hostname, protocol } = new URL(normalized);
+        if (protocol === "https:" && hostname.endsWith(".vercel.app")) {
+          return callback(null, true);
+        }
+      } catch (e) {
+        // ignore parse errors
+      }
+    }
     return callback(new Error(`CORS blocked for origin: ${origin}`));
   },
   credentials: true, // allow frontend to send cookies
