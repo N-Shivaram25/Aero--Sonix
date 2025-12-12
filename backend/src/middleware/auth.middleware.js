@@ -9,6 +9,10 @@ export const protectRoute = async (req, res, next) => {
       return res.status(401).json({ message: "Unauthorized - No token provided" });
     }
 
+    if (!process.env.JWT_SECRET_KEY) {
+      return res.status(500).json({ message: "Server misconfigured - JWT secret missing" });
+    }
+
     const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
 
     if (!decoded) {
@@ -25,6 +29,9 @@ export const protectRoute = async (req, res, next) => {
 
     next();
   } catch (error) {
+    if (error?.name === "JsonWebTokenError" || error?.name === "TokenExpiredError") {
+      return res.status(401).json({ message: "Unauthorized - Invalid token" });
+    }
     console.log("Error in protectRoute middleware", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
