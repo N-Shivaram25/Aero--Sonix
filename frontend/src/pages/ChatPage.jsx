@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { useStreamChat } from "../context/StreamChatContext";
 
@@ -16,6 +16,7 @@ import toast from "react-hot-toast";
 
 import ChatLoader from "../components/ChatLoader";
 import CallButton from "../components/CallButton";
+import { startOutgoingCallRinging } from "../components/OutgoingCallManager";
 
 const ChatPage = () => {
   const { id: targetUserId } = useParams();
@@ -37,6 +38,12 @@ const ChatPage = () => {
       if (!chatClient || !authUser || !targetUserId || !channelId) return;
 
       try {
+        try {
+          localStorage.setItem("aerosonix_last_chat_user", String(targetUserId));
+        } catch {
+          // ignore
+        }
+
         const currChannel = chatClient.channel("messaging", channelId, {
           members: [authUser._id, targetUserId],
         });
@@ -58,6 +65,13 @@ const ChatPage = () => {
     if (channel) {
       const callUrl = `${window.location.origin}/call/${channel.id}`;
 
+      startOutgoingCallRinging({
+        chatClient,
+        fromUserId: authUser?._id,
+        toUserId: targetUserId,
+        callUrl,
+      });
+
       channel.sendMessage({
         text: `I've started a video call. Join me here: ${callUrl}`,
       });
@@ -73,6 +87,11 @@ const ChatPage = () => {
       <Chat client={chatClient}>
         <Channel channel={channel}>
           <div className="w-full relative">
+            <div className="absolute left-3 top-3 z-10">
+              <Link to="/" className="btn btn-outline btn-sm">
+                Back
+              </Link>
+            </div>
             <CallButton handleVideoCall={handleVideoCall} />
             <Window>
               <ChannelHeader />

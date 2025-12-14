@@ -23,15 +23,14 @@ const FriendCard = ({ friend, onMessage }) => {
           <h3 className="font-semibold truncate">{friend.fullName}</h3>
         </div>
 
-        <div className="flex flex-wrap gap-1.5 mb-3">
-          <span className="badge badge-outline text-xs">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="text-xs opacity-80 truncate">
             {getCountryFlag(friend.country)}
             Country: {friend.country || ""}
-          </span>
-          <span className="badge badge-secondary text-xs">
-            {getLanguageFlag(friend.nativeLanguage)}
-            Native: {friend.nativeLanguage || ""}
-          </span>
+          </div>
+          <div className="text-xs opacity-80 truncate">
+            Language: {friend.nativeLanguage || ""}
+          </div>
         </div>
 
         <Link

@@ -4,16 +4,16 @@
 
 .str-chat__channel {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: stretch;
+  justify-content: stretch;
   background: linear-gradient(to bottom, #c9e8c9, #b7e7bb);
   height: 100%;
 }
 
 .str-chat__container {
-  max-width: 1200px;
+  max-width: none;
   width: 100%;
-  height: 80% !important;
+  height: 100% !important;
   margin: 0 auto !important;
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);

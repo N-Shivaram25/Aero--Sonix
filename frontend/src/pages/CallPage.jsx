@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
 import { getStreamToken } from "../lib/api";
+import { ArrowLeftIcon } from "lucide-react";
 
 import {
   StreamVideo,
@@ -77,7 +78,24 @@ const CallPage = () => {
 
   return (
     <div className="h-screen flex flex-col items-center justify-center">
-      <div className="relative">
+      <div className="relative w-full h-full">
+        <div className="absolute top-4 left-4 z-20">
+          <button
+            className="btn btn-outline btn-sm"
+            onClick={() => {
+              try {
+                const last = localStorage.getItem("aerosonix_last_chat_user");
+                if (last) return navigate(`/chat/${last}`);
+              } catch {
+                // ignore
+              }
+              return navigate("/");
+            }}
+          >
+            <ArrowLeftIcon className="size-4 mr-2" />
+            Back
+          </button>
+        </div>
         {client && call ? (
           <StreamVideo client={client}>
             <StreamCall call={call}>

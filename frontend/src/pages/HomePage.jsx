@@ -118,7 +118,7 @@ const HomePage = () => {
   }, [friends, recommendedUsers, incomingRequests, ensureUsersPresence]);
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <div className="p-4 sm:p-6 lg:p-8 bg-base-100 min-h-full">
       <div className="container mx-auto space-y-10">
         {/* FREQUENTLY CONTACTED */}
         {frequentContacts.length > 0 && (
@@ -171,6 +171,9 @@ const HomePage = () => {
             >
               <UsersIcon className="mr-2 size-4" />
               Friend Requests
+              {incomingRequests.length > 0 && (
+                <span className="badge badge-primary badge-sm ml-2">{incomingRequests.length}</span>
+              )}
             </button>
           </div>
         </div>
@@ -182,11 +185,20 @@ const HomePage = () => {
         ) : friends.length === 0 ? (
           <NoFriendsFound />
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {friends.map((friend) => (
-              <FriendCard key={friend._id} friend={friend} onMessage={bumpMessageCount} />
-            ))}
-          </div>
+          <>
+            <div className="flex justify-end">
+              {friends.length > 4 && (
+                <Link to="/friends" className="btn btn-link btn-sm">
+                  Show More
+                </Link>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {friends.slice(0, 4).map((friend) => (
+                <FriendCard key={friend._id} friend={friend} onMessage={bumpMessageCount} />
+              ))}
+            </div>
+          </>
         )}
 
         <section>
@@ -198,6 +210,12 @@ const HomePage = () => {
                   Recently created accounts
                 </p>
               </div>
+
+              {recommendedUsers.length > 0 && (
+                <Link to="/participants" className="btn btn-link btn-sm">
+                  Show More
+                </Link>
+              )}
             </div>
           </div>
 
@@ -245,16 +263,14 @@ const HomePage = () => {
                         </div>
                       </div>
 
-                      {/* Languages with flags */}
-                      <div className="flex flex-wrap gap-1.5">
-                        <span className="badge badge-outline">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm opacity-80 truncate">
                           {getCountryFlag(user.country)}
                           Country: {capitialize(user.country || "")}
-                        </span>
-                        <span className="badge badge-secondary">
-                          {getLanguageFlag(user.nativeLanguage)}
-                          Native: {capitialize(user.nativeLanguage)}
-                        </span>
+                        </div>
+                        <div className="text-sm opacity-80 truncate">
+                          Language: {capitialize(user.nativeLanguage || "")}
+                        </div>
                       </div>
 
                       {user.bio && <p className="text-sm opacity-70">{user.bio}</p>}
@@ -316,17 +332,14 @@ const HomePage = () => {
                           </div>
                           <div>
                             <div className="font-semibold">{req.sender.fullName}</div>
-                            <div className="flex flex-wrap gap-1.5 mt-1">
-                              {req.sender.country && (
-                                <span className="badge badge-outline badge-sm">
-                                  {getCountryFlag(req.sender.country)}
-                                  Country: {req.sender.country}
-                                </span>
-                              )}
-                              <span className="badge badge-secondary badge-sm">
-                                {getLanguageFlag(req.sender.nativeLanguage)}
-                                Native: {req.sender.nativeLanguage}
-                              </span>
+                            <div className="flex items-center justify-between gap-3 mt-1">
+                              <div className="text-xs opacity-80 truncate">
+                                {getCountryFlag(req.sender.country)}
+                                Country: {req.sender.country || ""}
+                              </div>
+                              <div className="text-xs opacity-80 truncate">
+                                Language: {req.sender.nativeLanguage || ""}
+                              </div>
                             </div>
                           </div>
                         </div>

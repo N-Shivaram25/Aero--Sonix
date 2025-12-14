@@ -1,4 +1,4 @@
-import { PhoneCallIcon, PhoneOffIcon } from "lucide-react";
+import { VideoIcon, XIcon } from "lucide-react";
 
 const IncomingCallPopup = ({ call, onAccept, onDecline }) => {
   if (!call) return null;
@@ -27,10 +27,10 @@ const IncomingCallPopup = ({ call, onAccept, onDecline }) => {
 
           <div className="mt-4 flex items-center justify-end gap-2">
             <button className="btn btn-success btn-sm text-white" onClick={onAccept}>
-              <PhoneCallIcon className="size-4" />
+              <VideoIcon className="size-4" />
             </button>
             <button className="btn btn-error btn-sm text-white" onClick={onDecline}>
-              <PhoneOffIcon className="size-4" />
+              <XIcon className="size-4" />
             </button>
           </div>
 

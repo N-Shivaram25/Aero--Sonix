@@ -10,6 +10,8 @@ import OnboardingPage from "./pages/OnboardingPage.jsx";
 import AdminLoginPage from "./pages/AdminLoginPage.jsx";
 import AdminDashboardPage from "./pages/AdminDashboardPage.jsx";
 import ProfilePage from "./pages/ProfilePage.jsx";
+import FriendsPage from "./pages/FriendsPage.jsx";
+import ParticipantsPage from "./pages/ParticipantsPage.jsx";
 
 import { Toaster } from "react-hot-toast";
 
@@ -29,7 +31,7 @@ const App = () => {
   if (isLoading) return <PageLoader />;
 
   return (
-    <div className="h-screen" data-theme={theme}>
+    <div className="min-h-screen" data-theme={theme}>
       <StreamChatProvider authUser={authUser}>
         <Routes>
           <Route path="/admin/login" element={<AdminLoginPage />} />
@@ -64,6 +66,32 @@ const App = () => {
               isAuthenticated && isOnboarded ? (
                 <Layout showSidebar={true}>
                   <NotificationsPage />
+                </Layout>
+              ) : (
+                <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
+              )
+            }
+          />
+
+          <Route
+            path="/friends"
+            element={
+              isAuthenticated && isOnboarded ? (
+                <Layout showSidebar={true}>
+                  <FriendsPage />
+                </Layout>
+              ) : (
+                <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
+              )
+            }
+          />
+
+          <Route
+            path="/participants"
+            element={
+              isAuthenticated && isOnboarded ? (
+                <Layout showSidebar={true}>
+                  <ParticipantsPage />
                 </Layout>
               ) : (
                 <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />

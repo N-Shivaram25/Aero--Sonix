@@ -94,6 +94,19 @@ const CallPopupManager = () => {
 
     try {
       const pathname = url.startsWith("http") ? new URL(url).pathname : url;
+
+      try {
+        const callerId = call?.fromUser?.id;
+        if (chatClient && authUser?._id && callerId) {
+          const channelId = [authUser._id, callerId].sort().join("-");
+          const ch = chatClient.channel("messaging", channelId, { members: [authUser._id, callerId] });
+          ch.watch();
+          ch.sendMessage({ text: `CALL_ACCEPTED: ${url}` });
+        }
+      } catch {
+        // ignore
+      }
+
       persist(null);
       if (location.pathname !== pathname) {
         navigate(pathname);

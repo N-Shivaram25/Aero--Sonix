@@ -113,7 +113,7 @@ const OnboardingPage = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="form-control">
                 <label className="label">
-                  <span className="label-text">Native Language</span>
+                  <span className="label-text">Language</span>
                 </label>
                 <select
                   name="nativeLanguage"
@@ -122,7 +122,7 @@ const OnboardingPage = () => {
                   className="select select-bordered w-full"
                   required
                 >
-                  <option value="">Select your native language</option>
+                  <option value="">Select your language</option>
                   {LANGUAGES.map((lang) => (
                     <option key={`native-${lang}`} value={lang.toLowerCase()}>
                       {lang}

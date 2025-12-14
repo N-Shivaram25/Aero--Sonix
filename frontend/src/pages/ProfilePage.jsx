@@ -15,6 +15,7 @@ import useLogout from "../hooks/useLogout";
 import { updateProfile } from "../lib/api";
 import { LANGUAGES } from "../constants";
 import { getCountryFlag, getLanguageFlag } from "../components/FriendCard";
+import { Link } from "react-router";
 
 const ProfilePage = () => {
   const queryClient = useQueryClient();
@@ -82,20 +83,25 @@ const ProfilePage = () => {
             <p className="opacity-70">Manage your onboarding details</p>
           </div>
 
-          <button
-            className="btn btn-outline"
-            onClick={logoutMutation}
-            disabled={isLoggingOut}
-          >
-            {isLoggingOut ? (
-              <>
-                <span className="loading loading-spinner loading-xs" />
-                Signing out...
-              </>
-            ) : (
-              "Sign Out"
-            )}
-          </button>
+          <div className="flex items-center gap-2">
+            <Link to="/" className="btn btn-outline">
+              Back
+            </Link>
+            <button
+              className="btn btn-outline"
+              onClick={logoutMutation}
+              disabled={isLoggingOut}
+            >
+              {isLoggingOut ? (
+                <>
+                  <span className="loading loading-spinner loading-xs" />
+                  Signing out...
+                </>
+              ) : (
+                "Sign Out"
+              )}
+            </button>
+          </div>
         </div>
 
         <div className="card bg-base-200 shadow-sm">
@@ -126,7 +132,7 @@ const ProfilePage = () => {
                   {formState.nativeLanguage && (
                     <span className="badge badge-secondary">
                       {getLanguageFlag(formState.nativeLanguage)}
-                      Native: {formState.nativeLanguage}
+                      Language: {formState.nativeLanguage}
                     </span>
                   )}
                   {formState.gender && <span className="badge badge-outline">Gender: {formState.gender}</span>}
@@ -172,7 +178,7 @@ const ProfilePage = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="form-control">
                   <label className="label">
-                    <span className="label-text">Native Language</span>
+                    <span className="label-text">Language</span>
                   </label>
                   <select
                     value={formState.nativeLanguage}
@@ -180,7 +186,7 @@ const ProfilePage = () => {
                     className="select select-bordered w-full"
                     required
                   >
-                    <option value="">Select your native language</option>
+                    <option value="">Select your language</option>
                     {LANGUAGES.map((lang) => (
                       <option key={`native-${lang}`} value={lang.toLowerCase()}>
                         {lang}

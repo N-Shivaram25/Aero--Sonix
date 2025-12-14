@@ -1,14 +1,25 @@
 import { Link, useLocation } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { BellIcon, HomeIcon, ShipWheelIcon, UsersIcon } from "lucide-react";
-import { getCountryFlag, getLanguageFlag } from "./FriendCard";
 import { useStreamChat } from "../context/StreamChatContext";
+import { useQuery } from "@tanstack/react-query";
+import { getFriendRequests } from "../lib/api";
 
 const Sidebar = () => {
   const { authUser } = useAuthUser();
   const { onlineMap } = useStreamChat();
   const location = useLocation();
   const currentPath = location.pathname;
+
+  const { data: friendRequests } = useQuery({
+    queryKey: ["friendRequests"],
+    queryFn: getFriendRequests,
+    enabled: Boolean(authUser),
+    staleTime: 10_000,
+  });
+
+  const notifCount =
+    (friendRequests?.incomingReqs?.length || 0) + (friendRequests?.acceptedReqs?.length || 0);
 
   return (
     <aside className="w-64 bg-base-200 border-r border-base-300 hidden lg:flex flex-col h-screen sticky top-0">
@@ -43,13 +54,24 @@ const Sidebar = () => {
         </Link>
 
         <Link
+          to="/participants"
+          className={`btn btn-ghost justify-start w-full gap-3 px-3 normal-case ${
+            currentPath === "/participants" ? "btn-active" : ""
+          }`}
+        >
+          <UsersIcon className="size-5 text-base-content opacity-70" />
+          <span>Participants</span>
+        </Link>
+
+        <Link
           to="/notifications"
           className={`btn btn-ghost justify-start w-full gap-3 px-3 normal-case ${
             currentPath === "/notifications" ? "btn-active" : ""
           }`}
         >
           <BellIcon className="size-5 text-base-content opacity-70" />
-          <span>Notifications</span>
+          <span className="flex-1">Notifications</span>
+          {notifCount > 0 && <span className="badge badge-primary badge-sm">{notifCount}</span>}
         </Link>
       </nav>
 
@@ -70,24 +92,6 @@ const Sidebar = () => {
             </div>
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-sm truncate">{authUser?.fullName}</p>
-              {authUser?.gender && (
-                <p className="text-xs opacity-70 mt-0.5 truncate">Gender: {authUser.gender}</p>
-              )}
-              {authUser?.country && (
-                <p className="text-xs opacity-70 flex items-center gap-1 mt-0.5 truncate">
-                  {getCountryFlag(authUser.country)}
-                  {authUser.country}
-                </p>
-              )}
-              {authUser?.nativeLanguage && (
-                <p className="text-xs opacity-70 flex items-center gap-1 mt-0.5 truncate">
-                  {getLanguageFlag(authUser.nativeLanguage)}
-                  Native: {authUser.nativeLanguage}
-                </p>
-              )}
-              {authUser?.location && (
-                <p className="text-xs opacity-70 mt-0.5 truncate">{authUser.location}</p>
-              )}
               <p
                 className={`text-xs flex items-center gap-1 mt-1 ${
                   onlineMap?.[authUser?._id] ? "text-success" : "text-neutral-500"

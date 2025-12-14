@@ -3,14 +3,25 @@ import useAuthUser from "../hooks/useAuthUser";
 import { BellIcon, LogOutIcon, ShipWheelIcon } from "lucide-react";
 import ThemeSelector from "./ThemeSelector";
 import useLogout from "../hooks/useLogout";
-import { getCountryFlag, getLanguageFlag } from "./FriendCard";
 import { useStreamChat } from "../context/StreamChatContext";
+import { useQuery } from "@tanstack/react-query";
+import { getFriendRequests } from "../lib/api";
 
 const Navbar = () => {
   const { authUser } = useAuthUser();
   const { onlineMap } = useStreamChat();
   const location = useLocation();
   const isChatPage = location.pathname?.startsWith("/chat");
+
+  const { data: friendRequests } = useQuery({
+    queryKey: ["friendRequests"],
+    queryFn: getFriendRequests,
+    enabled: Boolean(authUser),
+    staleTime: 10_000,
+  });
+
+  const notifCount =
+    (friendRequests?.incomingReqs?.length || 0) + (friendRequests?.acceptedReqs?.length || 0);
 
   // const queryClient = useQueryClient();
   // const { mutate: logoutMutation } = useMutation({
@@ -38,9 +49,14 @@ const Navbar = () => {
 
           <div className="flex items-center gap-3 sm:gap-4 ml-auto">
             <Link to={"/notifications"}>
-              <button className="btn btn-ghost btn-circle">
-                <BellIcon className="h-6 w-6 text-base-content opacity-70" />
-              </button>
+              <div className="indicator">
+                {notifCount > 0 && (
+                  <span className="indicator-item badge badge-primary badge-sm">{notifCount}</span>
+                )}
+                <button className="btn btn-ghost btn-circle">
+                  <BellIcon className="h-6 w-6 text-base-content opacity-70" />
+                </button>
+              </div>
             </Link>
           </div>
 
@@ -62,24 +78,8 @@ const Navbar = () => {
 
             <div className="hidden md:block min-w-0">
               <div className="text-sm font-semibold leading-4 truncate max-w-40">{authUser?.fullName}</div>
-              <div className="text-xs opacity-70 flex items-center gap-2 truncate max-w-72">
-                {authUser?.country && (
-                  <span className="flex items-center gap-1">
-                    {getCountryFlag(authUser.country)}
-                    {authUser.country}
-                  </span>
-                )}
-                {authUser?.nativeLanguage && (
-                  <span className="flex items-center gap-1">
-                    {getLanguageFlag(authUser.nativeLanguage)}
-                    {authUser.nativeLanguage}
-                  </span>
-                )}
-              </div>
-              <div className="text-xs opacity-70 truncate max-w-72">
-                {authUser?.gender ? `Gender: ${authUser.gender}` : ""}
-                {authUser?.gender && authUser?.location ? "  •  " : ""}
-                {authUser?.location ? `Location: ${authUser.location}` : ""}
+              <div className="text-xs opacity-70">
+                {onlineMap?.[authUser?._id] ? "Online" : "Offline"}
               </div>
             </div>
           </Link>
