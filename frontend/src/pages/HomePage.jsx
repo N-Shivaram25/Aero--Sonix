@@ -15,9 +15,11 @@ import { capitialize } from "../lib/utils";
 
 import FriendCard, { getCountryFlag, getLanguageFlag } from "../components/FriendCard";
 import NoFriendsFound from "../components/NoFriendsFound";
+import { useStreamChat } from "../context/StreamChatContext";
 
 const HomePage = () => {
   const queryClient = useQueryClient();
+  const { ensureUsersPresence, onlineMap } = useStreamChat();
   const [outgoingRequestsIds, setOutgoingRequestsIds] = useState(new Set());
   const [messageCounts, setMessageCounts] = useState({});
   const [recentlyAdded, setRecentlyAdded] = useState([]);
@@ -105,6 +107,15 @@ const HomePage = () => {
   })();
 
   const incomingRequests = friendRequests?.incomingReqs || [];
+
+  useEffect(() => {
+    const ids = [
+      ...friends.map((f) => f._id),
+      ...recommendedUsers.map((u) => u._id),
+      ...incomingRequests.map((r) => r?.sender?._id),
+    ].filter(Boolean);
+    ensureUsersPresence(ids);
+  }, [friends, recommendedUsers, incomingRequests, ensureUsersPresence]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -213,8 +224,14 @@ const HomePage = () => {
                   >
                     <div className="card-body p-5 space-y-4">
                       <div className="flex items-center gap-3">
-                        <div className="avatar size-16 rounded-full">
+                        <div className="avatar size-16 rounded-full relative">
                           <img src={user.profilePic} alt={user.fullName} />
+                          <span
+                            className={`absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full border-2 border-base-200 ${
+                              onlineMap?.[user._id] ? "bg-success" : "bg-neutral-500"
+                            }`}
+                            title={onlineMap?.[user._id] ? "Online" : "Offline"}
+                          />
                         </div>
 
                         <div>
@@ -288,8 +305,14 @@ const HomePage = () => {
                     <div className="card-body p-4">
                       <div className="flex items-center justify-between gap-3">
                         <div className="flex items-center gap-3">
-                          <div className="avatar w-12 h-12 rounded-full bg-base-300">
+                          <div className="avatar w-12 h-12 rounded-full bg-base-300 relative">
                             <img src={req.sender.profilePic} alt={req.sender.fullName} />
+                            <span
+                              className={`absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full border-2 border-base-200 ${
+                                onlineMap?.[req.sender?._id] ? "bg-success" : "bg-neutral-500"
+                              }`}
+                              title={onlineMap?.[req.sender?._id] ? "Online" : "Offline"}
+                            />
                           </div>
                           <div>
                             <div className="font-semibold">{req.sender.fullName}</div>

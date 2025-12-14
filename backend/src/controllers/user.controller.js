@@ -146,3 +146,61 @@ export async function getOutgoingFriendReqs(req, res) {
     res.status(500).json({ message: "Internal Server Error" });
   }
 }
+
+export async function updateMyProfile(req, res) {
+  try {
+    const userId = req.user.id;
+    const { fullName, bio, nativeLanguage, gender, location, profilePic } = req.body;
+
+    const splitLocation = (value) => {
+      if (!value || typeof value !== "string") return { city: "", country: "" };
+      const parts = value.split(",").map((p) => p.trim());
+      if (parts.length < 2) return { city: "", country: "" };
+      const countryPart = parts[parts.length - 1];
+      const cityPart = parts.slice(0, -1).join(", ");
+      return { city: cityPart, country: countryPart };
+    };
+
+    const { country } = splitLocation(location);
+
+    if (!fullName || !bio || !nativeLanguage || !gender || !location) {
+      return res.status(400).json({
+        message: "All fields are required",
+        missingFields: [
+          !fullName && "fullName",
+          !bio && "bio",
+          !nativeLanguage && "nativeLanguage",
+          !gender && "gender",
+          !location && "location",
+        ].filter(Boolean),
+      });
+    }
+
+    if (!country) {
+      return res.status(400).json({
+        message: "Location must be in the format: City, Country",
+      });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      {
+        fullName,
+        bio,
+        nativeLanguage,
+        gender,
+        location,
+        country,
+        ...(profilePic ? { profilePic } : {}),
+      },
+      { new: true }
+    ).select("-password");
+
+    if (!updatedUser) return res.status(404).json({ message: "User not found" });
+
+    return res.status(200).json({ success: true, user: updatedUser });
+  } catch (error) {
+    console.log("Error in updateMyProfile controller", error.message);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+}

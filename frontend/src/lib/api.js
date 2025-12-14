@@ -94,3 +94,8 @@ export async function adminDeleteUser(userId) {
   const response = await axiosInstance.delete(`/admin/users/${userId}`);
   return response.data;
 }
+
+export async function updateProfile(profileData) {
+  const response = await axiosInstance.put("/users/me", profileData);
+  return response.data;
+}

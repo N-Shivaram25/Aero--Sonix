@@ -3,9 +3,11 @@ import { acceptFriendRequest, getFriendRequests } from "../lib/api";
 import { BellIcon, ClockIcon, MessageSquareIcon, UserCheckIcon } from "lucide-react";
 import NoNotificationsFound from "../components/NoNotificationsFound";
 import { getCountryFlag, getLanguageFlag } from "../components/FriendCard";
+import { useStreamChat } from "../context/StreamChatContext";
 
 const NotificationsPage = () => {
   const queryClient = useQueryClient();
+  const { ensureUsersPresence, onlineMap } = useStreamChat();
 
   const { data: friendRequests, isLoading } = useQuery({
     queryKey: ["friendRequests"],
@@ -33,6 +35,14 @@ const NotificationsPage = () => {
 
   const incomingRequests = friendRequests?.incomingReqs || [];
   const acceptedRequests = friendRequests?.acceptedReqs || [];
+
+  useEffect(() => {
+    const ids = [
+      ...incomingRequests.map((r) => r?.sender?._id),
+      ...acceptedRequests.map((r) => r?.recipient?._id),
+    ].filter(Boolean);
+    ensureUsersPresence(ids);
+  }, [incomingRequests, acceptedRequests, ensureUsersPresence]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -62,8 +72,14 @@ const NotificationsPage = () => {
                       <div className="card-body p-4">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
-                            <div className="avatar w-14 h-14 rounded-full bg-base-300">
+                            <div className="avatar w-14 h-14 rounded-full bg-base-300 relative">
                               <img src={request.sender.profilePic} alt={request.sender.fullName} />
+                              <span
+                                className={`absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full border-2 border-base-200 ${
+                                  onlineMap?.[request.sender?._id] ? "bg-success" : "bg-neutral-500"
+                                }`}
+                                title={onlineMap?.[request.sender?._id] ? "Online" : "Offline"}
+                              />
                             </div>
                             <div>
                               <h3 className="font-semibold">{request.sender.fullName}</h3>
