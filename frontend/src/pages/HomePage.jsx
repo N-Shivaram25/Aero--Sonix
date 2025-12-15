@@ -7,9 +7,10 @@ import {
   getUserFriends,
   acceptFriendRequest,
   sendFriendRequest,
+  cancelFriendRequest,
 } from "../lib/api";
 import { Link } from "react-router";
-import { CheckCircleIcon, UserPlusIcon, UsersIcon } from "lucide-react";
+import { CheckCircleIcon, UserPlusIcon, UsersIcon, XIcon } from "lucide-react";
 
 import { capitialize } from "../lib/utils";
 
@@ -49,22 +50,26 @@ const HomePage = () => {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["outgoingFriendReqs"] }),
   });
 
+  const { mutate: cancelRequestMutation, isPending: canceling } = useMutation({
+    mutationFn: cancelFriendRequest,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["outgoingFriendReqs"] }),
+  });
+
   const { mutate: acceptRequestMutation, isPending: accepting } = useMutation({
     mutationFn: acceptFriendRequest,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["friendRequests"] });
       queryClient.invalidateQueries({ queryKey: ["friends"] });
+      queryClient.invalidateQueries({ queryKey: ["users"] });
     },
   });
 
   useEffect(() => {
     const outgoingIds = new Set();
-    if (outgoingFriendReqs && outgoingFriendReqs.length > 0) {
-      outgoingFriendReqs.forEach((req) => {
-        outgoingIds.add(req.recipient._id);
-      });
-      setOutgoingRequestsIds(outgoingIds);
-    }
+    (outgoingFriendReqs || []).forEach((req) => {
+      if (req?.recipient?._id) outgoingIds.add(req.recipient._id);
+    });
+    setOutgoingRequestsIds(outgoingIds);
   }, [outgoingFriendReqs]);
 
   useEffect(() => {
@@ -96,7 +101,11 @@ const HomePage = () => {
 
   const frequentContacts = friends
     .filter((f) => (messageCounts[f._id] || 0) >= 2)
-    .sort((a, b) => (messageCounts[b._id] || 0) - (messageCounts[a._id] || 0));
+    .sort((a, b) => (messageCounts[b._id] || 0) - (messageCounts[a._id] || 0))
+    .slice(0, 4);
+
+  const friendIdsSet = new Set((friends || []).map((f) => f?._id).filter(Boolean));
+  const participantsForHome = (recommendedUsers || []).filter((u) => u?._id && !friendIdsSet.has(u._id));
 
   const recentlyAddedFriends = (() => {
     const index = new Map(friends.map((f) => [f._id, f]));
@@ -143,7 +152,7 @@ const HomePage = () => {
               </div>
               <ul
                 tabIndex={0}
-                className="dropdown-content menu bg-base-100 rounded-box z-[1] w-64 p-2 shadow"
+                className="dropdown-content menu bg-base-100 rounded-box z-[1] w-64 p-2 shadow max-h-72 overflow-y-auto"
               >
                 {recentlyAddedFriends.length === 0 ? (
                   <li className="opacity-70 px-2 py-1">No recently added friends</li>
@@ -232,7 +241,7 @@ const HomePage = () => {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {recommendedUsers.map((user) => {
+              {participantsForHome.slice(0, 4).map((user) => {
                 const hasRequestBeenSent = outgoingRequestsIds.has(user._id);
 
                 return (
@@ -254,12 +263,6 @@ const HomePage = () => {
 
                         <div>
                           <h3 className="font-semibold text-lg">{user.fullName}</h3>
-                          {user.country && (
-                            <div className="flex items-center text-xs opacity-70 mt-1">
-                              {getCountryFlag(user.country)}
-                              <span>{user.country}</span>
-                            </div>
-                          )}
                         </div>
                       </div>
 
@@ -273,20 +276,25 @@ const HomePage = () => {
                         </div>
                       </div>
 
+                      {user.gender && (
+                        <div className="text-sm opacity-80">Gender: {capitialize(user.gender)}</div>
+                      )}
+
                       {user.bio && <p className="text-sm opacity-70">{user.bio}</p>}
 
                       {/* Action button */}
                       <button
-                        className={`btn w-full mt-2 ${
-                          hasRequestBeenSent ? "btn-disabled" : "btn-primary"
-                        } `}
-                        onClick={() => sendRequestMutation(user._id)}
-                        disabled={hasRequestBeenSent || isPending}
+                        className={`btn w-full mt-2 ${hasRequestBeenSent ? "btn-outline" : "btn-primary"}`}
+                        onClick={() => {
+                          if (hasRequestBeenSent) cancelRequestMutation(user._id);
+                          else sendRequestMutation(user._id);
+                        }}
+                        disabled={isPending || canceling}
                       >
                         {hasRequestBeenSent ? (
                           <>
-                            <CheckCircleIcon className="size-4 mr-2" />
-                            Request Sent
+                            <XIcon className="size-4 mr-2" />
+                            Undo Request
                           </>
                         ) : (
                           <>

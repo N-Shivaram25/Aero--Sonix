@@ -6,6 +6,10 @@ const FriendCard = ({ friend, onMessage }) => {
   const { onlineMap } = useStreamChat();
   const isOnline = Boolean(onlineMap?.[friend?._id]);
 
+  const genderLabel = friend?.gender
+    ? String(friend.gender).charAt(0).toUpperCase() + String(friend.gender).slice(1)
+    : "";
+
   return (
     <div className="card bg-base-200 hover:shadow-md transition-shadow">
       <div className="card-body p-4">
@@ -32,6 +36,8 @@ const FriendCard = ({ friend, onMessage }) => {
             Language: {friend.nativeLanguage || ""}
           </div>
         </div>
+
+        {genderLabel && <div className="text-xs opacity-80 mb-3">Gender: {genderLabel}</div>}
 
         <Link
           to={`/chat/${friend._id}`}

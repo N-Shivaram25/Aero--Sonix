@@ -87,12 +87,12 @@ const ChatPage = () => {
       <Chat client={chatClient}>
         <Channel channel={channel}>
           <div className="w-full relative">
-            <div className="absolute left-3 top-3 z-10">
+            <div className="flex items-center justify-between gap-3 p-3 border-b bg-base-200">
               <Link to="/" className="btn btn-outline btn-sm">
                 Back
               </Link>
+              <CallButton handleVideoCall={handleVideoCall} />
             </div>
-            <CallButton handleVideoCall={handleVideoCall} />
             <Window>
               <ChannelHeader />
               <MessageList />

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { SearchIcon, UserPlusIcon } from "lucide-react";
+import { SearchIcon, UserPlusIcon, XIcon } from "lucide-react";
 
-import { getRecommendedUsers, sendFriendRequest, getOutgoingFriendReqs } from "../lib/api";
+import { getRecommendedUsers, sendFriendRequest, getOutgoingFriendReqs, cancelFriendRequest } from "../lib/api";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { capitialize } from "../lib/utils";
 import { getCountryFlag } from "../components/FriendCard";
@@ -33,6 +33,11 @@ const ParticipantsPage = () => {
 
   const { mutate: sendRequestMutation, isPending } = useMutation({
     mutationFn: sendFriendRequest,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["outgoingFriendReqs"] }),
+  });
+
+  const { mutate: cancelRequestMutation, isPending: canceling } = useMutation({
+    mutationFn: cancelFriendRequest,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["outgoingFriendReqs"] }),
   });
 
@@ -100,16 +105,31 @@ const ParticipantsPage = () => {
                             <span>{capitialize(user.country)}</span>
                           </div>
                         )}
+                        {user.gender && (
+                          <div className="text-xs opacity-70 mt-1">Gender: {capitialize(user.gender)}</div>
+                        )}
                       </div>
                     </div>
 
                     <button
-                      className={`btn w-full mt-2 ${hasRequestBeenSent ? "btn-disabled" : "btn-primary"}`}
-                      onClick={() => sendRequestMutation(user._id)}
-                      disabled={hasRequestBeenSent || isPending}
+                      className={`btn w-full mt-2 ${hasRequestBeenSent ? "btn-outline" : "btn-primary"}`}
+                      onClick={() => {
+                        if (hasRequestBeenSent) cancelRequestMutation(user._id);
+                        else sendRequestMutation(user._id);
+                      }}
+                      disabled={isPending || canceling}
                     >
-                      <UserPlusIcon className="size-4 mr-2" />
-                      {hasRequestBeenSent ? "Request Sent" : "Send Friend Request"}
+                      {hasRequestBeenSent ? (
+                        <>
+                          <XIcon className="size-4 mr-2" />
+                          Undo Request
+                        </>
+                      ) : (
+                        <>
+                          <UserPlusIcon className="size-4 mr-2" />
+                          Send Friend Request
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>

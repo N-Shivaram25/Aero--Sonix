@@ -14,6 +14,8 @@ export const StreamChatProvider = ({ authUser, children }) => {
 
   const clientRef = useRef(null);
   const connectedUserIdRef = useRef(null);
+  const presenceFetchedAtRef = useRef(new Map());
+  const presenceInFlightRef = useRef(false);
 
   const { data: tokenData } = useQuery({
     queryKey: ["streamToken"],
@@ -83,17 +85,35 @@ export const StreamChatProvider = ({ authUser, children }) => {
   const ensureUsersPresence = async (userIds) => {
     try {
       if (!chatClient) return;
+      if (presenceInFlightRef.current) return;
+
+      const now = Date.now();
       const ids = [...new Set((userIds || []).filter(Boolean))];
       if (ids.length === 0) return;
 
-      const res = await chatClient.queryUsers({ id: { $in: ids } }, {}, { presence: true });
+      const staleMs = 20_000;
+      const toFetch = ids.filter((id) => {
+        const last = presenceFetchedAtRef.current.get(id) || 0;
+        return now - last > staleMs;
+      });
+
+      if (toFetch.length === 0) return;
+
+      // Stream rate limits: keep batches small
+      const batch = toFetch.slice(0, 25);
+
+      presenceInFlightRef.current = true;
+      const res = await chatClient.queryUsers({ id: { $in: batch } }, {}, { presence: true });
       const next = {};
       res?.users?.forEach((u) => {
         next[u.id] = Boolean(u.online);
+        presenceFetchedAtRef.current.set(u.id, now);
       });
       setOnlineMap((prev) => ({ ...prev, ...next }));
     } catch {
       // ignore
+    } finally {
+      presenceInFlightRef.current = false;
     }
   };
 

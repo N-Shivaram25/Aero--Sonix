@@ -97,11 +97,6 @@ const Sidebar = () => {
                   onlineMap?.[authUser?._id] ? "text-success" : "text-neutral-500"
                 }`}
               >
-                <span
-                  className={`size-2 rounded-full inline-block ${
-                    onlineMap?.[authUser?._id] ? "bg-success" : "bg-neutral-500"
-                  }`}
-                />
                 {onlineMap?.[authUser?._id] ? "Online" : "Offline"}
               </p>
             </div>

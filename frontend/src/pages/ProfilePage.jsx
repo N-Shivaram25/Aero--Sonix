@@ -14,7 +14,7 @@ import useAuthUser from "../hooks/useAuthUser";
 import useLogout from "../hooks/useLogout";
 import { updateProfile } from "../lib/api";
 import { LANGUAGES } from "../constants";
-import { getCountryFlag, getLanguageFlag } from "../components/FriendCard";
+import { getCountryFlag } from "../components/FriendCard";
 import { Link } from "react-router";
 
 const ProfilePage = () => {
@@ -123,20 +123,20 @@ const ProfilePage = () => {
                 <div className="text-lg font-semibold">{authUser?.fullName}</div>
                 <div className="text-sm opacity-70">{authUser?.email}</div>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {derivedCountry && (
+                  <div className="flex flex-wrap gap-2 mt-2">
                     <span className="badge badge-outline">
                       {getCountryFlag(derivedCountry)}
-                      {derivedCountry}
+                      {derivedCountry ? `Country: ${derivedCountry}` : "Country"}
                     </span>
-                  )}
-                  {formState.nativeLanguage && (
                     <span className="badge badge-secondary">
-                      {getLanguageFlag(formState.nativeLanguage)}
-                      Language: {formState.nativeLanguage}
+                      {formState.nativeLanguage ? `Language: ${formState.nativeLanguage}` : "Language"}
                     </span>
-                  )}
-                  {formState.gender && <span className="badge badge-outline">Gender: {formState.gender}</span>}
+                    <span className="badge badge-ghost">
+                      {formState.gender ? `Gender: ${formState.gender}` : "Gender"}
+                    </span>
+                  </div>
                 </div>
+
               </div>
 
               <button type="button" onClick={handleRandomAvatar} className="btn btn-accent">
