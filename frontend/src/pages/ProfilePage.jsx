@@ -202,7 +202,7 @@ const ProfilePage = () => {
             <div className="space-y-3">
               <div className="text-lg font-semibold">Voice Cloning</div>
               <div className="text-sm opacity-70">
-                Please upload at least 5 minutes of your own voice. No background noise.
+                Please upload at least 1 minute of your own voice. No background noise.
               </div>
               <div className="text-sm opacity-70">
                 Current Voice ID: {voiceId ? voiceId : "Not uploaded"}
@@ -228,8 +228,8 @@ const ProfilePage = () => {
                     const d = Number(audio.duration);
                     URL.revokeObjectURL(url);
                     setVoiceDurationSec(Number.isFinite(d) ? d : null);
-                    if (Number.isFinite(d) && d < 300) {
-                      toast.error("Please upload at least 5 minutes of your own voice. No background noise.");
+                    if (Number.isFinite(d) && d < 60) {
+                      toast.error("Please upload at least 1 minute of your own voice. No background noise.");
                       setVoiceFile(null);
                       return;
                     }

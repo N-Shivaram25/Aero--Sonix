@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
@@ -138,6 +138,8 @@ const TranslationControls = () => {
   const participants = useParticipants();
   const { speaker } = useSpeakerState();
 
+  const warnedNoVoiceRef = useRef(new Set());
+
   const [enabled, setEnabled] = useState(false);
   const [targetLanguage, setTargetLanguage] = useState("english");
   const [myVoiceId, setMyVoiceId] = useState("");
@@ -214,7 +216,18 @@ const TranslationControls = () => {
             const translatedText = trRes?.translatedText || "";
             if (!translatedText.trim()) return;
 
-            const ttsRes = await callTts({ text: translatedText, speakerUserId: p.userId });
+            let ttsRes;
+            try {
+              ttsRes = await callTts({ text: translatedText, speakerUserId: p.userId });
+            } catch (err) {
+              const status = err?.response?.status;
+              if (status === 400 && !warnedNoVoiceRef.current.has(p.userId)) {
+                warnedNoVoiceRef.current.add(p.userId);
+                toast.error("This user has not uploaded voice in Profile, so translated voice cannot be generated.");
+              }
+              return;
+            }
+
             const buf = ttsRes?.data;
             if (!buf) return;
 
