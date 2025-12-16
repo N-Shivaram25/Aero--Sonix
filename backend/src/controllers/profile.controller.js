@@ -1,4 +1,5 @@
 import User from "../models/User.js";
+import { getElevenLabsClient } from "../lib/elevenlabsClient.js";
 
 export async function cloneVoice(req, res) {
   try {
@@ -17,40 +18,60 @@ export async function cloneVoice(req, res) {
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) return res.status(500).json({ message: "ELEVENLABS_API_KEY is not set" });
 
-    const form = new FormData();
-    form.append("name", voiceName);
-    if (description) form.append("description", description);
-    form.append("remove_background_noise", String(removeBackgroundNoise));
-
-    for (const f of files) {
-      const blob = new Blob([f.buffer], { type: f.mimetype || "audio/webm" });
-      form.append("files", blob, f.originalname || "voice.webm");
-    }
-
-    const elevenRes = await fetch("https://api.elevenlabs.io/v1/voices/add", {
-      method: "POST",
-      headers: {
-        "xi-api-key": apiKey,
-      },
-      body: form,
-    });
-
-    const raw = await elevenRes.text();
-    let json;
+    let voiceId;
     try {
-      json = raw ? JSON.parse(raw) : null;
-    } catch {
-      json = null;
-    }
+      const elevenlabs = getElevenLabsClient();
+      const blobs = files.map(
+        (f) => new Blob([f.buffer], { type: f.mimetype || "audio/webm" })
+      );
 
-    if (!elevenRes.ok) {
-      return res.status(elevenRes.status).json({
-        message: "ElevenLabs voice cloning failed",
-        details: json || raw,
+      const created = await elevenlabs.voices.ivc.create({
+        name: voiceName,
+        files: blobs,
+        remove_background_noise: removeBackgroundNoise,
+        description: description || undefined,
       });
-    }
 
-    const voiceId = json?.voice_id;
+      voiceId = created?.voiceId || created?.voice_id;
+    } catch (sdkError) {
+      // Fallback to direct multipart fetch for environments where SDK upload fails.
+      const apiKeyFallback = process.env.ELEVENLABS_API_KEY;
+      if (!apiKeyFallback) return res.status(500).json({ message: "ELEVENLABS_API_KEY is not set" });
+      const form = new FormData();
+      form.append("name", voiceName);
+      if (description) form.append("description", description);
+      form.append("remove_background_noise", String(removeBackgroundNoise));
+
+      for (const f of files) {
+        const blob = new Blob([f.buffer], { type: f.mimetype || "audio/webm" });
+        form.append("files", blob, f.originalname || "voice.webm");
+      }
+
+      const elevenRes = await fetch("https://api.elevenlabs.io/v1/voices/add", {
+        method: "POST",
+        headers: {
+          "xi-api-key": apiKeyFallback,
+        },
+        body: form,
+      });
+
+      const raw = await elevenRes.text();
+      let json;
+      try {
+        json = raw ? JSON.parse(raw) : null;
+      } catch {
+        json = null;
+      }
+
+      if (!elevenRes.ok) {
+        return res.status(elevenRes.status).json({
+          message: "ElevenLabs voice cloning failed",
+          details: json || raw,
+        });
+      }
+
+      voiceId = json?.voice_id;
+    }
     if (!voiceId) {
       return res.status(500).json({ message: "Voice cloning failed" });
     }

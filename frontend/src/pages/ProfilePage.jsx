@@ -94,7 +94,6 @@ const ProfilePage = () => {
     },
     onError: (error) => {
       if (error?.response?.status === 401) {
-        toast.error("Unauthorized. Please login again.");
         return;
       }
       const apiMessage = error?.response?.data?.message;
@@ -167,8 +166,14 @@ const ProfilePage = () => {
 
       setIsRecording(true);
       rec.start(250);
-    } catch (err) {
-      toast.error(err?.message || "Microphone permission denied");
+    } catch (error) {
+      console.error("Error starting recording", error);
+      const name = error?.name || "";
+      if (name === "NotAllowedError" || name === "SecurityError") {
+        toast.error("Please allow microphone access to record your voice.");
+      } else {
+        toast.error("Could not start recording. Please check microphone permissions.");
+      }
     }
   };
 

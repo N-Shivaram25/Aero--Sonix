@@ -99,7 +99,7 @@ const CallPage = () => {
   if (isLoading || isConnecting) return <PageLoader />;
 
   return (
-    <div className="h-screen flex flex-col items-center justify-center">
+    <div className="min-h-[100dvh] flex flex-col items-center justify-center">
       <div className="relative w-full h-full">
         <div className="absolute top-4 left-4 z-20">
           <button
@@ -164,22 +164,13 @@ const TranslationControls = () => {
   const participants = useParticipants();
   const { speaker } = useSpeakerState();
 
-  const warnedNoVoiceRef = useRef(new Set());
-
   const [enabled, setEnabled] = useState(false);
   const [targetLanguage, setTargetLanguage] = useState("english");
-  const [myVoiceId, setMyVoiceId] = useState("");
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await getMyVoiceProfile();
-        setMyVoiceId(res?.elevenLabsVoiceId || "");
-      } catch {
-        // ignore
-      }
-    };
-    if (authUser) load();
+    // warm auth + avoid first-call 401 surprises
+    if (!authUser) return;
+    getMyVoiceProfile().catch(() => {});
   }, [authUser]);
 
   useEffect(() => {
@@ -212,6 +203,7 @@ const TranslationControls = () => {
 
     let stopped = false;
     const recorders = new Map();
+    const inFlight = new Map();
 
     const startForParticipant = async (p) => {
       if (!p || p.isLocalParticipant) return;
@@ -224,10 +216,13 @@ const TranslationControls = () => {
       try {
         const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
         recorders.set(p.sessionId, recorder);
+        inFlight.set(p.sessionId, false);
 
         recorder.ondataavailable = async (evt) => {
           if (stopped) return;
           if (!evt?.data || evt.data.size === 0) return;
+          if (inFlight.get(p.sessionId)) return;
+          inFlight.set(p.sessionId, true);
 
           try {
             const sttRes = await callStt({ audioBlob: evt.data, speakerUserId: p.userId });
@@ -246,11 +241,6 @@ const TranslationControls = () => {
             try {
               ttsRes = await callTts({ text: translatedText, speakerUserId: p.userId });
             } catch (err) {
-              const status = err?.response?.status;
-              if (status === 400 && !warnedNoVoiceRef.current.has(p.userId)) {
-                warnedNoVoiceRef.current.add(p.userId);
-                toast.error("This user has not uploaded voice in Profile, so translated voice cannot be generated.");
-              }
               return;
             }
 
@@ -264,10 +254,12 @@ const TranslationControls = () => {
             await audio.play();
           } catch {
             // ignore chunk failures to keep realtime flowing
+          } finally {
+            inFlight.set(p.sessionId, false);
           }
         };
 
-        recorder.start(400);
+        recorder.start(1200);
       } catch {
         // ignore
       }
@@ -291,17 +283,11 @@ const TranslationControls = () => {
         }
       }
       recorders.clear();
+      inFlight.clear();
     };
   }, [enabled, participants, targetLanguage]);
 
   const toggle = () => {
-    if (!enabled) {
-      if (!myVoiceId) {
-        alert("You didnot inserted your voice-ID.Go to Profile Page");
-        navigate("/profile");
-        return;
-      }
-    }
     setEnabled((v) => !v);
   };
 

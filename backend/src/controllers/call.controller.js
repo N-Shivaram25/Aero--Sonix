@@ -3,10 +3,21 @@ import { getElevenLabsClient } from "../lib/elevenlabsClient.js";
 import { getOpenAIClient } from "../lib/openaiClient.js";
 import { toElevenLabsLanguageCode } from "../lib/languageCodes.js";
 
+const getFallbackVoiceId = (gender) => {
+  const g = String(gender || "").toLowerCase();
+  const male = process.env.MALE_VOICE_ID || "";
+  const female = process.env.FEMALE_VOICE_ID || "";
+  if (g === "male") return male;
+  if (g === "female") return female;
+  return male || female;
+};
+
 const getSpeakerUser = async ({ speakerUserId, fallbackUser }) => {
   const resolvedId = speakerUserId || fallbackUser?.id;
   if (!resolvedId) return null;
-  const user = await User.findById(resolvedId).select("nativeLanguage elevenLabsVoiceId fullName");
+  const user = await User.findById(resolvedId).select(
+    "nativeLanguage elevenLabsVoiceId fullName gender"
+  );
   return user;
 };
 
@@ -15,13 +26,14 @@ export async function getVoiceProfile(req, res) {
     const { userId } = req.params;
     if (!userId) return res.status(400).json({ message: "userId is required" });
 
-    const user = await User.findById(userId).select("nativeLanguage elevenLabsVoiceId");
+    const user = await User.findById(userId).select("nativeLanguage elevenLabsVoiceId gender");
     if (!user) return res.status(404).json({ message: "User not found" });
 
     return res.status(200).json({
       success: true,
       nativeLanguage: user.nativeLanguage || "",
       elevenLabsVoiceId: user.elevenLabsVoiceId || "",
+      gender: user.gender || "",
     });
   } catch (error) {
     console.error("Error in getVoiceProfile controller", error);
@@ -122,11 +134,9 @@ export async function tts(req, res) {
     const speaker = await getSpeakerUser({ speakerUserId, fallbackUser: req.user });
     if (!speaker) return res.status(404).json({ message: "Speaker user not found" });
 
-    const voiceId = speaker.elevenLabsVoiceId;
+    const voiceId = speaker.elevenLabsVoiceId || getFallbackVoiceId(speaker.gender);
     if (!voiceId) {
-      return res.status(400).json({
-        message: "Speaker has not uploaded voice",
-      });
+      return res.status(500).json({ message: "No voice configured for TTS" });
     }
 
     const elevenlabs = getElevenLabsClient();

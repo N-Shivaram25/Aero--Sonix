@@ -34,7 +34,27 @@ const Navbar = () => {
   return (
     <nav className="bg-base-200 border-b border-base-300 sticky top-0 z-30 h-16 flex items-center">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-end w-full">
+        <div className="flex items-center justify-between w-full gap-2">
+          <div className="flex items-center gap-2">
+            <label htmlFor="app-drawer" className="btn btn-ghost btn-circle lg:hidden" aria-label="Open menu">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-6 w-6"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </label>
+
+            {!isChatPage && (
+              <Link to="/" className="flex items-center gap-2 lg:hidden">
+                <ShipWheelIcon className="size-8 text-primary" />
+                <span className="text-lg font-bold font-mono">Aero Sonix</span>
+              </Link>
+            )}
+          </div>
           {/* LOGO - ONLY IN THE CHAT PAGE */}
           {isChatPage && (
             <div className="pl-5">
@@ -47,7 +67,7 @@ const Navbar = () => {
             </div>
           )}
 
-          <div className="flex items-center gap-3 sm:gap-4 ml-auto">
+          <div className="flex items-center gap-2 sm:gap-4 ml-auto">
             <Link to={"/notifications"}>
               <div className="indicator">
                 {notifCount > 0 && (

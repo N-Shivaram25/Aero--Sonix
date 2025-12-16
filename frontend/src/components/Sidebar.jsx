@@ -11,6 +11,15 @@ const Sidebar = () => {
   const location = useLocation();
   const currentPath = location.pathname;
 
+  const closeDrawer = () => {
+    try {
+      const el = document.getElementById("app-drawer");
+      if (el && "checked" in el) el.checked = false;
+    } catch {
+      // ignore
+    }
+  };
+
   const { data: friendRequests } = useQuery({
     queryKey: ["friendRequests"],
     queryFn: getFriendRequests,
@@ -22,7 +31,7 @@ const Sidebar = () => {
     (friendRequests?.incomingReqs?.length || 0) + (friendRequests?.acceptedReqs?.length || 0);
 
   return (
-    <aside className="w-64 bg-base-200 border-r border-base-300 hidden lg:flex flex-col h-screen sticky top-0">
+    <aside className="w-72 bg-base-200 border-r border-base-300 flex flex-col min-h-full">
       <div className="p-5 border-b border-base-300">
         <Link to="/" className="flex items-center gap-2.5">
           <ShipWheelIcon className="size-9 text-primary" />
@@ -35,6 +44,7 @@ const Sidebar = () => {
       <nav className="flex-1 p-4 space-y-1">
         <Link
           to="/"
+          onClick={closeDrawer}
           className={`btn btn-ghost justify-start w-full gap-3 px-3 normal-case ${
             currentPath === "/" ? "btn-active" : ""
           }`}
@@ -45,6 +55,7 @@ const Sidebar = () => {
 
         <Link
           to="/friends"
+          onClick={closeDrawer}
           className={`btn btn-ghost justify-start w-full gap-3 px-3 normal-case ${
             currentPath === "/friends" ? "btn-active" : ""
           }`}
@@ -55,6 +66,7 @@ const Sidebar = () => {
 
         <Link
           to="/participants"
+          onClick={closeDrawer}
           className={`btn btn-ghost justify-start w-full gap-3 px-3 normal-case ${
             currentPath === "/participants" ? "btn-active" : ""
           }`}
@@ -65,6 +77,7 @@ const Sidebar = () => {
 
         <Link
           to="/notifications"
+          onClick={closeDrawer}
           className={`btn btn-ghost justify-start w-full gap-3 px-3 normal-case ${
             currentPath === "/notifications" ? "btn-active" : ""
           }`}
@@ -77,7 +90,7 @@ const Sidebar = () => {
 
       {/* USER PROFILE SECTION */}
       <div className="p-4 border-t border-base-300 mt-auto">
-        <Link to="/profile" className="block">
+        <Link to="/profile" className="block" onClick={closeDrawer}>
           <div className="flex items-start gap-3">
             <div className="avatar relative">
               <div className="w-10 rounded-full">

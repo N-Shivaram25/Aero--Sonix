@@ -23,3 +23,27 @@ axiosInstance.interceptors.request.use((config) => {
   }
   return config;
 });
+
+axiosInstance.interceptors.response.use(
+  (res) => res,
+  (error) => {
+    const status = error?.response?.status;
+    if (status === 401) {
+      try {
+        localStorage.removeItem("aerosonix_token");
+      } catch {
+        // ignore
+      }
+
+      const path = window.location?.pathname || "";
+      if (!path.startsWith("/login") && !path.startsWith("/signup") && !path.startsWith("/admin")) {
+        try {
+          window.location.assign("/login");
+        } catch {
+          // ignore
+        }
+      }
+    }
+    return Promise.reject(error);
+  }
+);
