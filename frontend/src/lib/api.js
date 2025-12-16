@@ -104,3 +104,50 @@ export async function updateProfile(profileData) {
   const response = await axiosInstance.put("/users/me", profileData);
   return response.data;
 }
+
+export async function getMyVoiceProfile() {
+  const response = await axiosInstance.get("/profile/me");
+  return response.data;
+}
+
+export async function cloneVoice({ file, onUploadProgress }) {
+  const form = new FormData();
+  form.append("files", file);
+  form.append("name", "Aerosonix Voice");
+  const response = await axiosInstance.post("/profile/clone-voice", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+    onUploadProgress,
+  });
+  return response.data;
+}
+
+export async function getUserVoiceProfile(userId) {
+  const response = await axiosInstance.get(`/call/voice-profile/${userId}`);
+  return response.data;
+}
+
+export async function callStt({ audioBlob, speakerUserId }) {
+  const form = new FormData();
+  form.append("audio", audioBlob);
+  form.append("speakerUserId", speakerUserId);
+  const response = await axiosInstance.post("/call/stt", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return response.data;
+}
+
+export async function callTranslate({ text, targetLanguage, speakerUserId }) {
+  const response = await axiosInstance.post("/call/translate", { text, targetLanguage, speakerUserId });
+  return response.data;
+}
+
+export async function callTts({ text, speakerUserId }) {
+  const response = await axiosInstance.post(
+    "/call/tts",
+    { text, speakerUserId },
+    {
+      responseType: "arraybuffer",
+    }
+  );
+  return response;
+}

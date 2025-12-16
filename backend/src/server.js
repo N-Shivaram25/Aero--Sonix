@@ -9,6 +9,8 @@ import authRoutes from "./routes/auth.route.js";
 import userRoutes from "./routes/user.route.js";
 import chatRoutes from "./routes/chat.route.js";
 import adminRoutes from "./routes/admin.route.js";
+import profileRoutes from "./routes/profile.route.js";
+import callRoutes from "./routes/call.route.js";
 
 import { connectDB } from "./lib/db.js";
 
@@ -78,12 +80,16 @@ app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/profile", profileRoutes);
+app.use("/api/call", callRoutes);
 
 // Also expose non-prefixed routes (useful when frontend points directly at backend base URL)
 app.use("/auth", authRoutes);
 app.use("/users", userRoutes);
 app.use("/chat", chatRoutes);
 app.use("/admin", adminRoutes);
+app.use("/profile", profileRoutes);
+app.use("/call", callRoutes);
 
 // Simple public health endpoint for readiness checks
 app.get("/api/health", (req, res) => {

@@ -12,7 +12,7 @@ import {
 
 import useAuthUser from "../hooks/useAuthUser";
 import useLogout from "../hooks/useLogout";
-import { updateProfile } from "../lib/api";
+import { cloneVoice, getMyVoiceProfile, updateProfile } from "../lib/api";
 import { LANGUAGES } from "../constants";
 import { getCountryFlag } from "../components/FriendCard";
 import { Link } from "react-router";
@@ -21,6 +21,11 @@ const ProfilePage = () => {
   const queryClient = useQueryClient();
   const { authUser } = useAuthUser();
   const { logoutMutation, isPending: isLoggingOut } = useLogout();
+
+  const [voiceFile, setVoiceFile] = useState(null);
+  const [voiceUploadPct, setVoiceUploadPct] = useState(0);
+  const [voiceId, setVoiceId] = useState("");
+  const [voiceDurationSec, setVoiceDurationSec] = useState(null);
 
   const [formState, setFormState] = useState({
     fullName: "",
@@ -43,6 +48,18 @@ const ProfilePage = () => {
     });
   }, [authUser]);
 
+  useEffect(() => {
+    const loadVoiceProfile = async () => {
+      try {
+        const res = await getMyVoiceProfile();
+        setVoiceId(res?.elevenLabsVoiceId || "");
+      } catch {
+        // ignore
+      }
+    };
+    if (authUser) loadVoiceProfile();
+  }, [authUser]);
+
   const derivedCountry = useMemo(() => {
     const value = formState.location;
     if (!value || typeof value !== "string") return "";
@@ -62,6 +79,21 @@ const ProfilePage = () => {
     },
   });
 
+  const { mutate: uploadVoiceMutation, isPending: uploadingVoice } = useMutation({
+    mutationFn: cloneVoice,
+    onSuccess: (data) => {
+      const next = data?.voiceId || "";
+      setVoiceId(next);
+      setVoiceFile(null);
+      setVoiceUploadPct(0);
+      toast.success("Voice uploaded and cloned successfully");
+      queryClient.invalidateQueries({ queryKey: ["authUser"] });
+    },
+    onError: (error) => {
+      toast.error(error?.response?.data?.message || error?.message || "Could not upload voice");
+    },
+  });
+
   const handleRandomAvatar = () => {
     const idx = Math.floor(Math.random() * 100) + 1;
     const randomAvatar = `https://api.dicebear.com/7.x/bottts/png?seed=${idx}`;
@@ -72,6 +104,26 @@ const ProfilePage = () => {
   const handleSubmit = (e) => {
     e.preventDefault();
     saveMutation(formState);
+  };
+
+  const handleVoiceUpload = async () => {
+    if (!voiceFile) {
+      return toast.error("Please select an audio file");
+    }
+
+    const okTypes = ["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/mp4", "audio/x-m4a", "audio/aac"];
+    if (voiceFile?.type && !okTypes.includes(voiceFile.type)) {
+      return toast.error("Please upload .mp3, .wav, or .m4a");
+    }
+
+    uploadVoiceMutation({
+      file: voiceFile,
+      onUploadProgress: (evt) => {
+        const total = evt?.total || 0;
+        const loaded = evt?.loaded || 0;
+        if (total > 0) setVoiceUploadPct(Math.round((loaded / total) * 100));
+      },
+    });
   };
 
   return (
@@ -146,6 +198,77 @@ const ProfilePage = () => {
             </div>
 
             <div className="divider" />
+
+            <div className="space-y-3">
+              <div className="text-lg font-semibold">Voice Cloning</div>
+              <div className="text-sm opacity-70">
+                Please upload at least 5 minutes of your own voice. No background noise.
+              </div>
+              <div className="text-sm opacity-70">
+                Current Voice ID: {voiceId ? voiceId : "Not uploaded"}
+              </div>
+
+              <input
+                type="file"
+                accept=".mp3,.wav,.m4a,audio/*"
+                className="file-input file-input-bordered w-full"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  if (!file) {
+                    setVoiceFile(null);
+                    setVoiceDurationSec(null);
+                    return;
+                  }
+
+                  const url = URL.createObjectURL(file);
+                  const audio = document.createElement("audio");
+                  audio.preload = "metadata";
+                  audio.src = url;
+                  audio.onloadedmetadata = () => {
+                    const d = Number(audio.duration);
+                    URL.revokeObjectURL(url);
+                    setVoiceDurationSec(Number.isFinite(d) ? d : null);
+                    if (Number.isFinite(d) && d < 300) {
+                      toast.error("Please upload at least 5 minutes of your own voice. No background noise.");
+                      setVoiceFile(null);
+                      return;
+                    }
+                    setVoiceFile(file);
+                  };
+                  audio.onerror = () => {
+                    URL.revokeObjectURL(url);
+                    setVoiceDurationSec(null);
+                    setVoiceFile(file);
+                  };
+                }}
+                disabled={uploadingVoice}
+              />
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleVoiceUpload}
+                  disabled={uploadingVoice}
+                >
+                  {uploadingVoice ? (
+                    <>
+                      <LoaderIcon className="animate-spin size-5 mr-2" />
+                      Uploading...
+                    </>
+                  ) : (
+                    "Upload Voice"
+                  )}
+                </button>
+
+                {uploadingVoice ? (
+                  <div className="flex-1">
+                    <progress className="progress progress-primary w-full" value={voiceUploadPct} max="100" />
+                    <div className="text-xs opacity-70 mt-1">{voiceUploadPct}%</div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="form-control">
