@@ -205,6 +205,36 @@ export async function getAiRobotHistory({ module }) {
   return response.data;
 }
 
+export async function getAiRobotConversations({ module }) {
+  const response = await axiosInstance.get("/ai-robot/conversations", {
+    params: { module },
+  });
+  return response.data;
+}
+
+export async function createAiRobotConversation({ module, title }) {
+  const response = await axiosInstance.post("/ai-robot/conversations", { module, title });
+  return response.data;
+}
+
+export async function getAiRobotConversation({ conversationId }) {
+  const response = await axiosInstance.get(`/ai-robot/conversations/${conversationId}`);
+  return response.data;
+}
+
+export async function deleteAiRobotConversation({ conversationId }) {
+  const response = await axiosInstance.delete(`/ai-robot/conversations/${conversationId}`);
+  return response.data;
+}
+
+export async function aiRobotSendConversationMessage({ conversationId, message, language }) {
+  const response = await axiosInstance.post(`/ai-robot/conversations/${conversationId}/message`, {
+    message,
+    language,
+  });
+  return response.data;
+}
+
 export async function aiRobotStt({ audioBlob }) {
   const form = new FormData();
   form.append("audio", audioBlob, "audio.webm");

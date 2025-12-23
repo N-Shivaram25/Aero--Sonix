@@ -18,24 +18,33 @@ const normalizeModule = (value) => {
   return allowed.has(v) ? v : DEFAULT_MODULE;
 };
 
+const moduleLabel = (module) => {
+  if (module === "interview") return "Interview";
+  if (module === "english_fluency") return "English Fluency";
+  if (module === "language_learning") return "Language Learning";
+  if (module === "programming") return "Programming";
+  return "Home";
+};
+
 const buildSystemPrompt = ({ module, language }) => {
+  const pageName = moduleLabel(module);
   const lang = String(language || "").trim();
   const langClause = lang ? `Respond in ${lang}.` : "Respond in the same language as the user.";
 
   if (module === "interview") {
-    return `You are AI Robot, an interview coach. Ask realistic interview questions, follow up based on the user's answers, and give concise feedback and improvement tips. ${langClause}`;
+    return `You are AI Robot on the ${pageName} page, an interview coach. Ask realistic interview questions, follow up based on the user's answers, and give concise feedback and improvement tips. ${langClause}`;
   }
   if (module === "english_fluency") {
-    return `You are AI Robot, an English fluency coach. Help the user speak clearly and naturally. Correct grammar gently, suggest better phrasing, and ask short follow-up questions to keep them speaking. ${langClause}`;
+    return `You are AI Robot on the ${pageName} page, an English fluency coach. Help the user speak clearly and naturally. Correct grammar gently, suggest better phrasing, and ask short follow-up questions to keep them speaking. ${langClause}`;
   }
   if (module === "language_learning") {
-    return `You are AI Robot, a language tutor. Teach step-by-step with examples, short exercises, and quick corrections. Keep responses concise and interactive. ${langClause}`;
+    return `You are AI Robot on the ${pageName} page, a language tutor. Teach step-by-step with examples, short exercises, and quick corrections. Keep responses concise and interactive. ${langClause}`;
   }
   if (module === "programming") {
-    return `You are AI Robot, a programming mentor. Ask clarifying questions, propose clean solutions, and explain concepts clearly. When giving code, keep it minimal and correct. ${langClause}`;
+    return `You are AI Robot on the ${pageName} page, a programming mentor. Ask clarifying questions, propose clean solutions, and explain concepts clearly. When giving code, keep it minimal and correct. ${langClause}`;
   }
 
-  return `You are AI Robot, a helpful assistant. ${langClause}`;
+  return `You are AI Robot on the ${pageName} page, a helpful assistant. ${langClause}`;
 };
 
 const getDefaultVoices = () => {

@@ -12,7 +12,11 @@ import AdminDashboardPage from "./pages/AdminDashboardPage.jsx";
 import ProfilePage from "./pages/ProfilePage.jsx";
 import FriendsPage from "./pages/FriendsPage.jsx";
 import ParticipantsPage from "./pages/ParticipantsPage.jsx";
-import AiRobotPage from "./pages/AiRobotPage.jsx";
+import AiRobotHomePage from "./pages/ai-robot/AiRobotHomePage.jsx";
+import AiRobotInterviewPage from "./pages/ai-robot/AiRobotInterviewPage.jsx";
+import AiRobotEnglishFluencyPage from "./pages/ai-robot/AiRobotEnglishFluencyPage.jsx";
+import AiRobotLanguageLearningPage from "./pages/ai-robot/AiRobotLanguageLearningPage.jsx";
+import AiRobotProgrammingPage from "./pages/ai-robot/AiRobotProgrammingPage.jsx";
 
 import { Toaster } from "react-hot-toast";
 
@@ -119,7 +123,72 @@ const App = () => {
         element={
           isAuthenticated && isOnboarded ? (
             <Layout showSidebar={true}>
-              <AiRobotPage />
+              <Navigate to="/ai-robot/home" replace />
+            </Layout>
+          ) : (
+            <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
+          )
+        }
+      />
+
+      <Route
+        path="/ai-robot/home"
+        element={
+          isAuthenticated && isOnboarded ? (
+            <Layout showSidebar={true}>
+              <AiRobotHomePage />
+            </Layout>
+          ) : (
+            <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
+          )
+        }
+      />
+
+      <Route
+        path="/ai-robot/interview"
+        element={
+          isAuthenticated && isOnboarded ? (
+            <Layout showSidebar={true}>
+              <AiRobotInterviewPage />
+            </Layout>
+          ) : (
+            <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
+          )
+        }
+      />
+
+      <Route
+        path="/ai-robot/english-fluency"
+        element={
+          isAuthenticated && isOnboarded ? (
+            <Layout showSidebar={true}>
+              <AiRobotEnglishFluencyPage />
+            </Layout>
+          ) : (
+            <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
+          )
+        }
+      />
+
+      <Route
+        path="/ai-robot/language-learning"
+        element={
+          isAuthenticated && isOnboarded ? (
+            <Layout showSidebar={true}>
+              <AiRobotLanguageLearningPage />
+            </Layout>
+          ) : (
+            <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
+          )
+        }
+      />
+
+      <Route
+        path="/ai-robot/programming"
+        element={
+          isAuthenticated && isOnboarded ? (
+            <Layout showSidebar={true}>
+              <AiRobotProgrammingPage />
             </Layout>
           ) : (
             <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />

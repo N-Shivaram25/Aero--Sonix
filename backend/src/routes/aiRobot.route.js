@@ -2,6 +2,13 @@ import express from "express";
 import multer from "multer";
 import { protectRoute } from "../middleware/auth.middleware.js";
 import {
+  createConversation,
+  deleteConversation,
+  getConversation,
+  listConversations,
+  sendConversationMessage,
+} from "../controllers/aiRobotConversations.controller.js";
+import {
   getHistory,
   getVoices,
   renameVoice,
@@ -24,5 +31,11 @@ router.get("/history", getHistory);
 router.post("/message", sendMessage);
 router.post("/stt", upload.single("audio"), stt);
 router.post("/tts", tts);
+
+router.get("/conversations", listConversations);
+router.post("/conversations", createConversation);
+router.get("/conversations/:conversationId", getConversation);
+router.delete("/conversations/:conversationId", deleteConversation);
+router.post("/conversations/:conversationId/message", sendConversationMessage);
 
 export default router;

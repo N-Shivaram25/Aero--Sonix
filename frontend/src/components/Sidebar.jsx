@@ -88,10 +88,10 @@ const Sidebar = () => {
         </Link>
 
         <Link
-          to="/ai-robot"
+          to="/ai-robot/home"
           onClick={closeDrawer}
           className={`btn btn-ghost justify-start w-full gap-3 px-3 normal-case ${
-            currentPath === "/ai-robot" ? "btn-active" : ""
+            currentPath.startsWith("/ai-robot") ? "btn-active" : ""
           }`}
         >
           <BotIcon className="size-5 text-base-content opacity-70" />
