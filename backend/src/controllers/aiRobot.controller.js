@@ -324,8 +324,17 @@ export async function stt(req, res) {
 
     const json = await openaiRes.json().catch(() => null);
     if (!openaiRes.ok) {
+      const retryAfter = openaiRes.headers?.get?.("retry-after");
+      if (openaiRes.status === 429 && retryAfter) {
+        try {
+          res.setHeader("Retry-After", retryAfter);
+        } catch {
+          // ignore
+        }
+      }
+
       return res.status(openaiRes.status).json({
-        message: "Transcription failed",
+        message: openaiRes.status === 429 ? "Rate limit reached. Please wait and try again." : "Transcription failed",
         details: json,
       });
     }
@@ -370,12 +379,22 @@ export async function tts(req, res) {
       if (!owned) return res.status(404).json({ message: "Voice not found" });
     }
 
-    const elevenlabs = getElevenLabsClient();
-    const audio = await elevenlabs.textToSpeech.convert(selectedVoiceId, {
-      text,
-      modelId: "eleven_multilingual_v2",
-      outputFormat: "mp3_44100_128",
-    });
+    let audio;
+    try {
+      const elevenlabs = getElevenLabsClient();
+      audio = await elevenlabs.textToSpeech.convert(selectedVoiceId, {
+        text,
+        modelId: "eleven_multilingual_v2",
+        outputFormat: "mp3_44100_128",
+      });
+    } catch (e) {
+      const status = e?.statusCode || e?.status || e?.response?.status;
+      const details = e?.response?.data || e?.body || e?.message;
+      return res.status(status || 502).json({
+        message: "ElevenLabs TTS failed",
+        details,
+      });
+    }
 
     const reader = audio.getReader();
     const buffer = await readerToBuffer(reader);

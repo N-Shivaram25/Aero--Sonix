@@ -24,6 +24,11 @@ const ROUTES = [
 
 const mimePreference = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/mpeg"];
 
+const VOICE_CHAT_MAX_MS = 30_000;
+const VOICE_CLONE_MIN_SECONDS = 60;
+const VOICE_CLONE_CLIP_MAX_MS = 30_000;
+const VOICE_CLONE_TOTAL_MAX_SECONDS = 60;
+
 const getSupportedMimeType = () => {
   for (const t of mimePreference) {
     try {
@@ -63,15 +68,27 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isResponding, setIsResponding] = useState(false);
 
+  const [voiceModeOn, setVoiceModeOn] = useState(false);
+  const voiceModeTokenRef = useRef(0);
+
+  const aiSpeakingRef = useRef(false);
+
   const stopTimerRef = useRef(null);
   const audioRef = useRef(null);
+
+  const voiceCloneTimerRef = useRef(null);
+  const [voiceCloneSeconds, setVoiceCloneSeconds] = useState(0);
 
   const [voiceModalName, setVoiceModalName] = useState("");
   const [voiceSampleRecorder, setVoiceSampleRecorder] = useState(null);
   const [voiceSampleIsRecording, setVoiceSampleIsRecording] = useState(false);
-  const [voiceSampleBlob, setVoiceSampleBlob] = useState(null);
+  const [voiceSamples, setVoiceSamples] = useState([]);
   const [creatingVoiceId, setCreatingVoiceId] = useState(false);
   const voiceSampleStopTimerRef = useRef(null);
+
+  const voiceSamplesTotalSeconds = useMemo(() => {
+    return (voiceSamples || []).reduce((sum, s) => sum + (s?.seconds || 0), 0);
+  }, [voiceSamples]);
 
   const activeTab = useMemo(() => {
     const path = String(location?.pathname || "");
@@ -87,13 +104,51 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       const blob = new Blob([buffer], { type: "audio/mpeg" });
       const url = URL.createObjectURL(blob);
       if (audioRef.current) {
+        aiSpeakingRef.current = true;
+        setIsResponding(true);
+        audioRef.current.muted = false;
+        audioRef.current.volume = 1;
         audioRef.current.src = url;
-        audioRef.current.play();
+        const p = audioRef.current.play();
+        if (p && typeof p.catch === "function") {
+          p.catch(() => {
+            aiSpeakingRef.current = false;
+            setIsResponding(false);
+            toast.error("Audio playback blocked by browser. Tap Voice ON again to enable sound.");
+          });
+        }
       }
     } catch {
       // ignore
     }
   };
+
+  const stopSpeaking = () => {
+    try {
+      if (!audioRef.current) return;
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current.removeAttribute("src");
+      audioRef.current.load();
+      aiSpeakingRef.current = false;
+      setIsResponding(false);
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      try {
+        if (voiceCloneTimerRef.current) {
+          clearInterval(voiceCloneTimerRef.current);
+          voiceCloneTimerRef.current = null;
+        }
+      } catch {
+        // ignore
+      }
+    };
+  }, []);
 
   const loadVoices = async () => {
     try {
@@ -196,14 +251,24 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     try {
       if (isRecording) return;
       if (isTranscribing || isResponding) return;
+      if (!voiceModeOn) return;
       if (!selectedVoiceId) {
         toast.error("Please choose a voice");
         return;
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
       const mimeType = getSupportedMimeType();
-      const rec = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      const rec = mimeType
+        ? new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 128000 })
+        : new MediaRecorder(stream);
 
       const chunks = [];
       rec.ondataavailable = (e) => {
@@ -247,7 +312,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         } catch {
           // ignore
         }
-      }, 30_000);
+      }, VOICE_CHAT_MAX_MS);
     } catch (e) {
       toast.error(e?.message || "Microphone access denied");
     }
@@ -270,11 +335,51 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
 
   const processVoiceChat = async (blob) => {
     try {
+      const token = voiceModeTokenRef.current;
+      if (!voiceModeOn) return;
+
+      // Avoid spamming STT with tiny recordings
+      if (!blob || blob.size < 1500) {
+        if (voiceModeOn && token === voiceModeTokenRef.current) {
+          setTimeout(() => {
+            if (!voiceModeOn) return;
+            if (isRecording || isTranscribing || isResponding) return;
+            startRecording();
+          }, 250);
+        }
+        return;
+      }
+
       setIsTranscribing(true);
-      const sttRes = await aiRobotStt({ audioBlob: blob });
+      const sttRes = await (async () => {
+        const maxAttempts = 3;
+        let delayMs = 1200;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          try {
+            return await aiRobotStt({ audioBlob: blob });
+          } catch (err) {
+            const status = err?.response?.status;
+            if (status === 429 && attempt < maxAttempts) {
+              toast.error(`Too many requests. Retrying in ${Math.round(delayMs / 1000)}s...`);
+              await new Promise((r) => setTimeout(r, delayMs));
+              delayMs *= 2;
+              continue;
+            }
+            throw err;
+          }
+        }
+        return null;
+      })();
       const text = String(sttRes?.text || "").trim();
       if (!text) {
         toast.error("Could not transcribe audio");
+        if (voiceModeOn && token === voiceModeTokenRef.current) {
+          setTimeout(() => {
+            if (!voiceModeOn) return;
+            if (isRecording || isTranscribing || isResponding) return;
+            startRecording();
+          }, 250);
+        }
         return;
       }
 
@@ -289,14 +394,84 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       setMessages((prev) => [...prev, { role: "assistant", text: reply }]);
       await loadConversations();
 
+      if (!voiceModeOn || voiceModeTokenRef.current !== token) {
+        setIsResponding(false);
+        return;
+      }
+
       const ttsRes = await aiRobotTts({ text: reply, voiceId: selectedVoiceId });
+      if (!voiceModeOn || voiceModeTokenRef.current !== token) {
+        setIsResponding(false);
+        return;
+      }
+
       playAudioBuffer(ttsRes);
     } catch (e) {
+      const status = e?.response?.status;
+      if (status === 429) {
+        toast.error("Too many requests. Please wait a moment, then turn Voice ON again.");
+        setVoiceModeOn(false);
+        voiceModeTokenRef.current += 1;
+        stopSpeaking();
+        return;
+      }
       toast.error(e?.response?.data?.message || e?.message || "Voice chat failed");
     } finally {
       setIsTranscribing(false);
-      setIsResponding(false);
+      if (!aiSpeakingRef.current) {
+        setIsResponding(false);
+      }
     }
+  };
+
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    const onEnded = () => {
+      aiSpeakingRef.current = false;
+      setIsResponding(false);
+      if (!voiceModeOn) return;
+      if (isRecording || isTranscribing || isResponding) return;
+      setTimeout(() => {
+        if (!voiceModeOn) return;
+        startRecording();
+      }, 250);
+    };
+    const onPause = () => {
+      if (!aiSpeakingRef.current) return;
+      aiSpeakingRef.current = false;
+      setIsResponding(false);
+    };
+    el.addEventListener("ended", onEnded);
+    el.addEventListener("pause", onPause);
+    return () => {
+      el.removeEventListener("ended", onEnded);
+      el.removeEventListener("pause", onPause);
+    };
+  }, [voiceModeOn, isRecording, isTranscribing, isResponding]);
+
+  const toggleVoiceMode = async () => {
+    if (voiceModeOn) {
+      setVoiceModeOn(false);
+      voiceModeTokenRef.current += 1;
+      try {
+        if (isRecording) stopRecording();
+      } catch {
+        // ignore
+      }
+      stopSpeaking();
+      return;
+    }
+
+    if (!selectedVoiceId) {
+      toast.error("Please choose a voice");
+      return;
+    }
+
+    setVoiceModeOn(true);
+    voiceModeTokenRef.current += 1;
+    stopSpeaking();
+    await startRecording();
   };
 
   const openVoiceModal = () => {
@@ -320,9 +495,24 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const startVoiceSampleRecording = async () => {
     try {
       if (voiceSampleIsRecording) return;
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (voiceSamplesTotalSeconds >= VOICE_CLONE_TOTAL_MAX_SECONDS) {
+        toast.error("You already recorded enough audio.");
+        return;
+      }
+
+      setVoiceCloneSeconds(0);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
       const mimeType = getSupportedMimeType();
-      const rec = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      const rec = mimeType
+        ? new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 128000 })
+        : new MediaRecorder(stream);
 
       const chunks = [];
       rec.ondataavailable = (e) => {
@@ -332,6 +522,15 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       rec.onstop = () => {
         try {
           stream.getTracks().forEach((t) => t.stop());
+        } catch {
+          // ignore
+        }
+
+        try {
+          if (voiceCloneTimerRef.current) {
+            clearInterval(voiceCloneTimerRef.current);
+            voiceCloneTimerRef.current = null;
+          }
         } catch {
           // ignore
         }
@@ -348,12 +547,35 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         setVoiceSampleIsRecording(false);
         setVoiceSampleRecorder(null);
         const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
-        setVoiceSampleBlob(blob);
+        if (blob && blob.size) {
+          setVoiceSamples((prev) => {
+            const next = [...(prev || []), { blob, seconds: voiceCloneSeconds || 0 }];
+            const capped = [];
+            let total = 0;
+            for (const s of next) {
+              if (!s?.seconds) continue;
+              if (total >= VOICE_CLONE_TOTAL_MAX_SECONDS) break;
+              capped.push(s);
+              total += s.seconds;
+            }
+            return capped;
+          });
+        }
       };
 
       rec.start();
       setVoiceSampleRecorder(rec);
       setVoiceSampleIsRecording(true);
+
+      if (voiceCloneTimerRef.current) {
+        clearInterval(voiceCloneTimerRef.current);
+        voiceCloneTimerRef.current = null;
+      }
+
+      const startedAt = Date.now();
+      voiceCloneTimerRef.current = setInterval(() => {
+        setVoiceCloneSeconds(Math.floor((Date.now() - startedAt) / 1000));
+      }, 1000);
 
       voiceSampleStopTimerRef.current = setTimeout(() => {
         try {
@@ -361,7 +583,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         } catch {
           // ignore
         }
-      }, 30_000);
+      }, VOICE_CLONE_CLIP_MAX_MS);
     } catch (e) {
       toast.error(e?.message || "Microphone access denied");
     }
@@ -389,15 +611,23 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         toast.error("Please enter a voice name");
         return;
       }
-      if (!voiceSampleBlob || !voiceSampleBlob.size) {
-        toast.error("Please record your voice (up to 30 seconds)");
+      if (!Array.isArray(voiceSamples) || voiceSamples.length === 0) {
+        toast.error("Please record your voice");
+        return;
+      }
+
+      if (voiceSamplesTotalSeconds < VOICE_CLONE_MIN_SECONDS) {
+        toast.error(`Please record at least ${VOICE_CLONE_MIN_SECONDS} seconds (total).`);
         return;
       }
 
       setCreatingVoiceId(true);
 
-      const file = blobToFile(voiceSampleBlob, "voice.webm");
-      const res = await uploadAiRobotVoice({ voiceName: name, audioFiles: [file] });
+      // Upload multiple valid container files for better results.
+      const files = voiceSamples
+        .filter((s) => s?.blob && s.blob.size)
+        .map((s, idx) => blobToFile(s.blob, `voice_${idx + 1}.webm`));
+      const res = await uploadAiRobotVoice({ voiceName: name, audioFiles: files });
 
       const voiceId = String(res?.voice?.voiceId || "");
       if (voiceId) {
@@ -407,11 +637,21 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       }
 
       setVoiceModalName("");
-      setVoiceSampleBlob(null);
+      setVoiceSamples([]);
+      setVoiceCloneSeconds(0);
       closeVoiceModal();
       await loadVoices();
     } catch (e) {
-      toast.error(e?.response?.data?.message || e?.message || "Failed to create Voice ID");
+      const details = e?.response?.data?.details;
+      const msg = e?.response?.data?.message || e?.message || "Failed to create Voice ID";
+      const detailText =
+        typeof details === "string"
+          ? details
+          : details
+            ? JSON.stringify(details)
+            : "";
+      const preview = detailText && detailText.length > 180 ? `${detailText.slice(0, 180)}...` : detailText;
+      toast.error(preview ? `${msg}: ${preview}` : msg);
     } finally {
       setCreatingVoiceId(false);
     }
@@ -549,23 +789,31 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {!isRecording ? (
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        disabled={isTranscribing || isResponding}
-                        onClick={startRecording}
-                      >
-                        Voice
-                      </button>
-                    ) : (
-                      <button type="button" className="btn btn-error" onClick={stopRecording}>
+                    <button
+                      type="button"
+                      className={voiceModeOn ? "btn btn-error" : "btn btn-primary"}
+                      disabled={isTranscribing || isResponding}
+                      onClick={toggleVoiceMode}
+                    >
+                      {voiceModeOn ? "Voice OFF" : "Voice ON"}
+                    </button>
+
+                    {voiceModeOn && isRecording ? (
+                      <button type="button" className="btn btn-outline" onClick={stopRecording}>
                         Stop
                       </button>
-                    )}
+                    ) : null}
 
                     <div className="text-sm opacity-70">
-                      {isTranscribing ? "Transcribing..." : isResponding ? "AI speaking..." : isRecording ? "Recording (max 30s)" : ""}
+                      {isTranscribing
+                        ? "Transcribing..."
+                        : isResponding
+                          ? "AI responding..."
+                          : voiceModeOn && isRecording
+                            ? "Listening (max 30s)"
+                            : voiceModeOn
+                              ? "Voice mode is ON"
+                              : "Voice mode is OFF"}
                     </div>
                   </div>
                 </div>
@@ -598,7 +846,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
           <div className="modal-box">
             <h3 className="font-bold text-lg">Upload your Voice</h3>
             <p className="text-sm opacity-70 mt-1">
-              Record up to 30 seconds. We will generate your Voice ID and save it.
+              Record 2 clips (30s + 30s) to reach 60 seconds. We will generate your Voice ID and save it.
             </p>
 
             <div className="mt-4 space-y-3">
@@ -625,8 +873,24 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                   </button>
                 )}
 
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={voiceSampleIsRecording}
+                  onClick={() => {
+                    setVoiceSamples([]);
+                    setVoiceCloneSeconds(0);
+                  }}
+                >
+                  Clear
+                </button>
+
                 <div className="text-sm opacity-70">
-                  {voiceSampleIsRecording ? "Recording (max 30s)" : voiceSampleBlob ? "Recorded" : ""}
+                  {voiceSampleIsRecording
+                    ? `Recording clip (${voiceCloneSeconds}s / 30s)`
+                    : voiceSamples.length
+                      ? `Clips: ${voiceSamples.length}, Total: ${voiceSamplesTotalSeconds}s / ${VOICE_CLONE_MIN_SECONDS}s`
+                      : ""}
                 </div>
               </div>
 
