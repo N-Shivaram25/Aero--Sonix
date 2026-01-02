@@ -33,6 +33,22 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    elevenLabsVoiceCloneStatus: {
+      type: String,
+      default: "idle",
+    },
+    elevenLabsVoiceCloneError: {
+      type: String,
+      default: "",
+    },
+    elevenLabsVoiceCloneStartedAt: {
+      type: Date,
+      default: null,
+    },
+    elevenLabsVoiceCloneCompletedAt: {
+      type: Date,
+      default: null,
+    },
     gender: {
       type: String,
       default: "",

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import {
@@ -24,10 +24,15 @@ const ProfilePage = () => {
 
   const [voiceUploadPct, setVoiceUploadPct] = useState(0);
   const [voiceId, setVoiceId] = useState("");
+  const [voiceCloneStatus, setVoiceCloneStatus] = useState("idle");
+  const [voiceCloneError, setVoiceCloneError] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
   const [recorder, setRecorder] = useState(null);
   const [recordedBlob, setRecordedBlob] = useState(null);
+
+  const voicePollIntervalRef = useRef(null);
+  const voicePollStartedAtRef = useRef(0);
 
   const [formState, setFormState] = useState({
     fullName: "",
@@ -55,12 +60,64 @@ const ProfilePage = () => {
       try {
         const res = await getMyVoiceProfile();
         setVoiceId(res?.elevenLabsVoiceId || "");
+        setVoiceCloneStatus(res?.elevenLabsVoiceCloneStatus || "idle");
+        setVoiceCloneError(res?.elevenLabsVoiceCloneError || "");
+
+        if (!res?.elevenLabsVoiceId && res?.elevenLabsVoiceCloneStatus === "processing") {
+          startVoicePolling();
+        }
       } catch {
         // ignore
       }
     };
     if (authUser) loadVoiceProfile();
   }, [authUser]);
+
+  useEffect(() => {
+    return () => {
+      if (voicePollIntervalRef.current) {
+        clearInterval(voicePollIntervalRef.current);
+        voicePollIntervalRef.current = null;
+      }
+    };
+  }, []);
+
+  const startVoicePolling = () => {
+    if (voicePollIntervalRef.current) return;
+    voicePollStartedAtRef.current = Date.now();
+
+    voicePollIntervalRef.current = setInterval(async () => {
+      try {
+        const res = await getMyVoiceProfile();
+        const nextVoiceId = res?.elevenLabsVoiceId || "";
+        const nextStatus = res?.elevenLabsVoiceCloneStatus || "idle";
+        const nextErr = res?.elevenLabsVoiceCloneError || "";
+
+        setVoiceId(nextVoiceId);
+        setVoiceCloneStatus(nextStatus);
+        setVoiceCloneError(nextErr);
+
+        const elapsed = Date.now() - (voicePollStartedAtRef.current || Date.now());
+        if (nextVoiceId || nextStatus === "failed" || elapsed > 180000) {
+          if (voicePollIntervalRef.current) {
+            clearInterval(voicePollIntervalRef.current);
+            voicePollIntervalRef.current = null;
+          }
+
+          if (nextVoiceId) {
+            toast.success("Voice ID Created");
+            queryClient.invalidateQueries({ queryKey: ["authUser"] });
+          } else if (nextStatus === "failed") {
+            toast.error(String(nextErr || "Voice cloning failed"));
+          } else {
+            toast.error("Voice is still processing. Please wait and refresh later.");
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }, 3000);
+  };
 
   const derivedCountry = useMemo(() => {
     const value = formState.location;
@@ -84,13 +141,31 @@ const ProfilePage = () => {
   const { mutate: uploadVoiceMutation, isPending: uploadingVoice } = useMutation({
     mutationFn: cloneVoice,
     onSuccess: (data) => {
-      const nextRaw = data?.voiceId;
-      const next = typeof nextRaw === "string" ? nextRaw : nextRaw ? String(nextRaw) : "";
-      setVoiceId(next);
       setVoiceUploadPct(0);
       setRecordedBlob(null);
-      toast.success("Voice ID Created");
-      queryClient.invalidateQueries({ queryKey: ["authUser"] });
+
+      const status = data?.status || data?.voiceCloneStatus;
+      if (status === "processing") {
+        setVoiceId("");
+        setVoiceCloneStatus("processing");
+        setVoiceCloneError("");
+        toast.success("Voice uploaded. Processing in ElevenLabs...");
+        startVoicePolling();
+        return;
+      }
+
+      const nextRaw = data?.voiceId;
+      const next = typeof nextRaw === "string" ? nextRaw : nextRaw ? String(nextRaw) : "";
+      if (next) {
+        setVoiceId(next);
+        setVoiceCloneStatus("ready");
+        setVoiceCloneError("");
+        toast.success("Voice ID Created");
+        queryClient.invalidateQueries({ queryKey: ["authUser"] });
+      } else {
+        toast.success("Voice uploaded. Processing...");
+        startVoicePolling();
+      }
     },
     onError: (error) => {
       if (error?.response?.status === 401) {
@@ -101,6 +176,7 @@ const ProfilePage = () => {
       const detailsText =
         typeof details === "string" ? details : details?.detail || details?.message || details?.error;
       toast.error(String(detailsText || apiMessage || error?.message || "Could not upload voice"));
+      setVoiceCloneStatus("failed");
     },
   });
 
@@ -299,7 +375,19 @@ const ProfilePage = () => {
                 Record your voice (Minimum 30 seconds, Maximum 1 Minute). No background noise.
               </div>
               <div className="text-sm opacity-70">
-                Current Voice ID: {voiceId ? String(voiceId) : "Not uploaded"}
+                Current Voice ID:{" "}
+                {voiceId ? (
+                  String(voiceId)
+                ) : voiceCloneStatus === "processing" ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="loading loading-spinner loading-xs" />
+                    Processing...
+                  </span>
+                ) : voiceCloneStatus === "failed" ? (
+                  <span className="text-error">Failed{voiceCloneError ? `: ${voiceCloneError}` : ""}</span>
+                ) : (
+                  "Not uploaded"
+                )}
               </div>
 
               <div className="flex items-center gap-3 flex-wrap">
@@ -310,7 +398,7 @@ const ProfilePage = () => {
                     if (isRecording) return stopRecording();
                     return startRecording();
                   }}
-                  disabled={uploadingVoice}
+                  disabled={uploadingVoice || voiceCloneStatus === "processing"}
                 >
                   {isRecording ? "Stop Recording" : "Live Voice Recording"}
                 </button>
@@ -321,12 +409,17 @@ const ProfilePage = () => {
                   type="button"
                   className="btn btn-success"
                   onClick={handleCreateVoiceId}
-                  disabled={uploadingVoice || isRecording}
+                  disabled={uploadingVoice || isRecording || voiceCloneStatus === "processing"}
                 >
                   {uploadingVoice ? (
                     <>
                       <LoaderIcon className="animate-spin size-5 mr-2" />
-                      Creating...
+                      Uploading...
+                    </>
+                  ) : voiceCloneStatus === "processing" ? (
+                    <>
+                      <LoaderIcon className="animate-spin size-5 mr-2" />
+                      Processing...
                     </>
                   ) : (
                     "Create Voice ID"
