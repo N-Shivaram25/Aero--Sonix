@@ -1,9 +1,122 @@
 import AiRobotVoice from "../models/AiRobotVoice.js";
 import AiRobotHistory from "../models/AiRobotHistory.js";
+import User from "../models/User.js";
 import { getElevenLabsClient } from "../lib/elevenlabsClient.js";
 import { getOpenAIClient } from "../lib/openaiClient.js";
 
 const DEFAULT_MODULE = "general";
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const withTimeout = async (promise, timeoutMs) => {
+  let timeoutId;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error("Request timed out")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+};
+
+const normalizeAudioMimeType = (value) => {
+  if (!value || typeof value !== "string") return "audio/webm";
+  const trimmed = value.trim();
+  const semi = trimmed.indexOf(";");
+  return semi === -1 ? trimmed : trimmed.slice(0, semi);
+};
+
+const createElevenLabsVoice = async ({ voiceName, files, removeBackgroundNoise, description }) => {
+  const blobs = files.map(
+    (f) =>
+      new Blob([f.buffer], {
+        type: normalizeAudioMimeType(f.mimetype) || "audio/webm",
+      })
+  );
+
+  try {
+    const elevenlabs = getElevenLabsClient();
+    const created = await withTimeout(
+      elevenlabs.voices.ivc.create({
+        name: voiceName,
+        files: blobs,
+        remove_background_noise: removeBackgroundNoise,
+        description: description || undefined,
+      }),
+      45000
+    );
+    const voiceId = created?.voiceId || created?.voice_id;
+    if (voiceId) return voiceId;
+  } catch {
+    // ignore
+  }
+
+  const apiKeyFallback = process.env.ELEVENLABS_API_KEY;
+  if (!apiKeyFallback) {
+    throw new Error("ELEVENLABS_API_KEY is not set");
+  }
+
+  const controller = new AbortController();
+  const abortId = setTimeout(() => controller.abort(), 45000);
+  try {
+    const form = new FormData();
+    form.append("name", voiceName);
+    if (description) form.append("description", description);
+    form.append("remove_background_noise", String(removeBackgroundNoise));
+
+    for (let i = 0; i < files.length; i += 1) {
+      const f = files[i];
+      const blob = new Blob([f.buffer], { type: normalizeAudioMimeType(f.mimetype) || "audio/webm" });
+      form.append("files", blob, f.originalname || `voice_${i + 1}.webm`);
+    }
+
+    const elevenRes = await fetch("https://api.elevenlabs.io/v1/voices/add", {
+      method: "POST",
+      headers: {
+        "xi-api-key": apiKeyFallback,
+      },
+      body: form,
+      signal: controller.signal,
+    });
+
+    const raw = await elevenRes.text();
+    let json;
+    try {
+      json = raw ? JSON.parse(raw) : null;
+    } catch {
+      json = null;
+    }
+
+    if (!elevenRes.ok) {
+      const details = json || raw || "";
+      const asText = typeof details === "string" ? details : JSON.stringify(details);
+      throw new Error(asText || "ElevenLabs voice cloning failed");
+    }
+
+    const voiceId = json?.voice_id;
+    if (!voiceId) throw new Error("Voice cloning failed");
+    return voiceId;
+  } finally {
+    clearTimeout(abortId);
+  }
+};
+
+const createElevenLabsVoiceWithRetry = async (params) => {
+  let lastError = "";
+  const attempts = 3;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await createElevenLabsVoice(params);
+    } catch (e) {
+      lastError = e?.message ? String(e.message) : "Voice cloning failed";
+      if (attempt < attempts) await sleep(800 * attempt);
+    }
+  }
+  throw new Error(lastError || "Voice cloning failed");
+};
 
 const normalizeModule = (value) => {
   const v = String(value || "").trim().toLowerCase();
@@ -106,59 +219,22 @@ export async function uploadVoice(req, res) {
     const description = String(req.body?.description || "").trim();
 
     let voiceId;
-
     try {
-      const elevenlabs = getElevenLabsClient();
-      const blobs = files.map((f) => new Blob([f.buffer], { type: f.mimetype || "audio/webm" }));
-      const created = await elevenlabs.voices.ivc.create({
-        name: voiceName,
-        files: blobs,
-        remove_background_noise: removeBackgroundNoise,
-        description: description || undefined,
+      voiceId = await createElevenLabsVoiceWithRetry({
+        voiceName,
+        files: files.map((f) => ({
+          buffer: f.buffer,
+          mimetype: f.mimetype,
+          originalname: f.originalname,
+        })),
+        removeBackgroundNoise,
+        description,
       });
-      voiceId = created?.voiceId || created?.voice_id;
-    } catch (sdkError) {
-      const apiKeyFallback = process.env.ELEVENLABS_API_KEY;
-      if (!apiKeyFallback) return res.status(500).json({ message: "ELEVENLABS_API_KEY is not set" });
-
-      const form = new FormData();
-      form.append("name", voiceName);
-      if (description) form.append("description", description);
-      form.append("remove_background_noise", String(removeBackgroundNoise));
-
-      for (const f of files) {
-        const blob = new Blob([f.buffer], { type: f.mimetype || "audio/webm" });
-        form.append("files", blob, f.originalname || "voice.webm");
-      }
-
-      const elevenRes = await fetch("https://api.elevenlabs.io/v1/voices/add", {
-        method: "POST",
-        headers: {
-          "xi-api-key": apiKeyFallback,
-        },
-        body: form,
+    } catch (e) {
+      return res.status(502).json({
+        message: "ElevenLabs voice cloning failed",
+        details: e?.message || "Voice cloning failed",
       });
-
-      const raw = await elevenRes.text();
-      let json;
-      try {
-        json = raw ? JSON.parse(raw) : null;
-      } catch {
-        json = null;
-      }
-
-      if (!elevenRes.ok) {
-        return res.status(elevenRes.status).json({
-          message: "ElevenLabs voice cloning failed",
-          details: json || raw,
-        });
-      }
-
-      voiceId = json?.voice_id;
-    }
-
-    if (!voiceId) {
-      return res.status(500).json({ message: "Voice cloning failed" });
     }
 
     const createdVoice = await AiRobotVoice.create({
@@ -166,6 +242,18 @@ export async function uploadVoice(req, res) {
       voiceName,
       voiceId,
     });
+
+    // Keep Profile page in sync with the most recently created voice.
+    try {
+      await User.findByIdAndUpdate(userId, {
+        elevenLabsVoiceId: voiceId,
+        elevenLabsVoiceCloneStatus: "ready",
+        elevenLabsVoiceCloneError: "",
+        elevenLabsVoiceCloneCompletedAt: new Date(),
+      });
+    } catch {
+      // ignore
+    }
 
     return res.status(201).json({
       success: true,

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 import toast from "react-hot-toast";
+import { Mic, MicOff } from "lucide-react";
 import { LANGUAGES } from "../../constants";
 import {
   aiRobotSendConversationMessage,
@@ -70,6 +71,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
 
   const [voiceModeOn, setVoiceModeOn] = useState(false);
   const voiceModeTokenRef = useRef(0);
+  const voiceModeOnRef = useRef(false);
 
   const aiSpeakingRef = useRef(false);
 
@@ -136,6 +138,10 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       // ignore
     }
   };
+
+  useEffect(() => {
+    voiceModeOnRef.current = voiceModeOn;
+  }, [voiceModeOn]);
 
   useEffect(() => {
     return () => {
@@ -247,11 +253,11 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     }
   };
 
-  const startRecording = async () => {
+  const startRecording = async ({ force } = {}) => {
     try {
       if (isRecording) return;
       if (isTranscribing || isResponding) return;
-      if (!voiceModeOn) return;
+      if (!force && !voiceModeOnRef.current) return;
       if (!selectedVoiceId) {
         toast.error("Please choose a voice");
         return;
@@ -293,6 +299,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
 
         setIsRecording(false);
         setRecorder(null);
+
+        if (!voiceModeOnRef.current) return;
 
         const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
         if (!blob || !blob.size) {
@@ -453,6 +461,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const toggleVoiceMode = async () => {
     if (voiceModeOn) {
       setVoiceModeOn(false);
+      voiceModeOnRef.current = false;
       voiceModeTokenRef.current += 1;
       try {
         if (isRecording) stopRecording();
@@ -469,9 +478,10 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     }
 
     setVoiceModeOn(true);
+    voiceModeOnRef.current = true;
     voiceModeTokenRef.current += 1;
     stopSpeaking();
-    await startRecording();
+    await startRecording({ force: true });
   };
 
   const openVoiceModal = () => {
@@ -632,6 +642,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       const voiceId = String(res?.voice?.voiceId || "");
       if (voiceId) {
         toast.success(`Voice ID generated: ${voiceId}`);
+        setSelectedVoiceId(voiceId);
       } else {
         toast.success("Voice ID generated");
       }
@@ -791,11 +802,22 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      className={voiceModeOn ? "btn btn-error" : "btn btn-primary"}
+                      className={`btn btn-circle ${voiceModeOn ? "btn-error ring ring-error ring-offset-2 ring-offset-base-200" : "btn-primary"}`}
                       disabled={isTranscribing || isResponding}
                       onClick={toggleVoiceMode}
+                      aria-pressed={voiceModeOn}
+                      title={voiceModeOn ? "Voice OFF" : "Voice ON"}
                     >
-                      {voiceModeOn ? "Voice OFF" : "Voice ON"}
+                      {voiceModeOn ? (
+                        <span className="relative">
+                          {isRecording ? (
+                            <span className="absolute -inset-2 rounded-full bg-error/30 animate-ping" />
+                          ) : null}
+                          <Mic className="size-5 relative" />
+                        </span>
+                      ) : (
+                        <MicOff className="size-5" />
+                      )}
                     </button>
 
                     {voiceModeOn && isRecording ? (
