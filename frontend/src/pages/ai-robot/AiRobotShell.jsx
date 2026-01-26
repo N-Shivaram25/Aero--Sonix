@@ -349,23 +349,15 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
           };
 
           recognition.onresult = (event) => {
-            let interimTranscript = '';
-            let finalTranscript = '';
+            let fullTranscript = '';
 
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-              const transcript = event.results[i][0].transcript;
-              if (event.results[i].isFinal) {
-                finalTranscript += transcript + ' ';
-              } else {
-                interimTranscript += transcript;
-              }
+            // Collect all results from the beginning
+            for (let i = 0; i < event.results.length; i++) {
+              fullTranscript += event.results[i][0].transcript;
             }
 
-            // Update live transcription with both final and interim results
-            setLiveTranscription((prev) => {
-              const updated = (prev + finalTranscript + interimTranscript).trim();
-              return updated;
-            });
+            // Update with the complete transcript (no duplicates)
+            setLiveTranscription(fullTranscript.trim());
           };
 
           recognition.onerror = (event) => {
@@ -495,24 +487,28 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       setMessages((prev) => [...prev, { role: "assistant", text: reply }]);
       await loadConversations();
 
-      // Hide transcription after getting response
-      setTimeout(() => {
-        setShowTranscription(false);
-        setLiveTranscription("");
-      }, 2000);
+      // Hide transcription immediately after getting response
+      setShowTranscription(false);
+      setLiveTranscription("");
 
       if (!voiceModeOn || voiceModeTokenRef.current !== token) {
         setIsResponding(false);
         return;
       }
 
-      const ttsRes = await aiRobotTts({ text: reply, voiceId: selectedVoiceId });
-      if (!voiceModeOn || voiceModeTokenRef.current !== token) {
+      // Try to play TTS, but don't fail if it doesn't work
+      try {
+        if (selectedVoiceId) {
+          const ttsRes = await aiRobotTts({ text: reply, voiceId: selectedVoiceId });
+          if (voiceModeOn && voiceModeTokenRef.current === token) {
+            playAudioBuffer(ttsRes);
+          }
+        }
+      } catch (ttsError) {
+        console.error("TTS failed:", ttsError);
+        // Continue without audio - the text response is already shown
         setIsResponding(false);
-        return;
       }
-
-      playAudioBuffer(ttsRes);
     } catch (e) {
       const status = e?.response?.status;
       if (status === 429) {
@@ -793,44 +789,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
             <p className="text-sm opacity-70">{subtitle}</p>
           </div>
 
-          <div className="flex flex-col gap-2 md:flex-row md:items-center">
-            <label className="form-control w-full md:w-64">
-              <div className="label">
-                <span className="label-text">AI Robot Language</span>
-              </div>
-              <select
-                className="select select-bordered"
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
-              >
-                {LANGUAGES.map((l) => (
-                  <option key={l} value={l}>
-                    {l}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="form-control w-full md:w-72">
-              <div className="label">
-                <span className="label-text">AI Robot Voice</span>
-              </div>
-              <select
-                className="select select-bordered"
-                value={selectedVoiceId}
-                onChange={(e) => setSelectedVoiceId(e.target.value)}
-              >
-                <option value="" disabled>
-                  Select a voice
-                </option>
-                {voices.map((v) => (
-                  <option key={v.voiceId} value={v.voiceId}>
-                    {v.voiceName}
-                  </option>
-                ))}
-              </select>
-            </label>
-
+          <div className="flex flex-col gap-2 md:flex-row md:items-center justify-end">
             <button type="button" className="btn btn-outline" onClick={openVoiceModal}>
               Upload your Voice
             </button>
