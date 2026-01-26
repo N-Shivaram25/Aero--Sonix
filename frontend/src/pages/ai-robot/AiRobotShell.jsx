@@ -86,6 +86,11 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [voiceSampleIsRecording, setVoiceSampleIsRecording] = useState(false);
   const [voiceSamples, setVoiceSamples] = useState([]);
   const [creatingVoiceId, setCreatingVoiceId] = useState(false);
+
+  // New states for UI redesign
+  const [sidebarMinimized, setSidebarMinimized] = useState(false);
+  const [liveTranscription, setLiveTranscription] = useState("");
+  const [showTranscription, setShowTranscription] = useState(false);
   const voiceSampleStopTimerRef = useRef(null);
 
   const voiceSamplesTotalSeconds = useMemo(() => {
@@ -359,6 +364,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       }
 
       setIsTranscribing(true);
+      setShowTranscription(true);
       const sttRes = await (async () => {
         const maxAttempts = 3;
         let delayMs = 1200;
@@ -379,8 +385,14 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         return null;
       })();
       const text = String(sttRes?.text || "").trim();
+
+      // Display transcription in the horizontal bar
+      setLiveTranscription(text);
+
       if (!text) {
         toast.error("Could not transcribe audio");
+        setShowTranscription(false);
+        setLiveTranscription("");
         if (voiceModeOn && token === voiceModeTokenRef.current) {
           setTimeout(() => {
             if (!voiceModeOn) return;
@@ -402,6 +414,12 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       setMessages((prev) => [...prev, { role: "assistant", text: reply }]);
       await loadConversations();
 
+      // Hide transcription after getting response
+      setTimeout(() => {
+        setShowTranscription(false);
+        setLiveTranscription("");
+      }, 2000);
+
       if (!voiceModeOn || voiceModeTokenRef.current !== token) {
         setIsResponding(false);
         return;
@@ -421,9 +439,13 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         setVoiceModeOn(false);
         voiceModeTokenRef.current += 1;
         stopSpeaking();
+        setShowTranscription(false);
+        setLiveTranscription("");
         return;
       }
       toast.error(e?.response?.data?.message || e?.message || "Voice chat failed");
+      setShowTranscription(false);
+      setLiveTranscription("");
     } finally {
       setIsTranscribing(false);
       if (!aiSpeakingRef.current) {
@@ -721,125 +743,85 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
           </div>
         </div>
 
-        <div className="card bg-base-200 border border-base-300">
-          <div className="card-body py-4">
-            <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-              <div className="tabs tabs-boxed bg-base-100">
-                {ROUTES.map((r) => (
-                  <Link
-                    key={r.path}
-                    to={r.path}
-                    className={`tab ${activeTab === r.path ? "tab-active" : ""}`}
-                  >
-                    {r.label}
-                  </Link>
-                ))}
-              </div>
 
-              <div className="text-sm opacity-70">Current Page: {moduleLabel}</div>
-            </div>
-          </div>
-        </div>
 
-        <div className="flex flex-col lg:flex-row gap-4 min-h-[70vh]">
-          <div className="lg:w-80 w-full">
+        <div className={`flex flex-col lg:flex-row gap-4 min-h-[70vh] transition-all duration-300`}>
+          {/* Sidebar - Suggestions */}
+          <div className={`${sidebarMinimized ? 'lg:w-16' : 'lg:w-80'} w-full transition-all duration-300`}>
             <div className="card bg-base-200 border border-base-300 h-full">
               <div className="card-body p-4 gap-3">
                 <div className="flex items-center justify-between">
-                  <h2 className="font-semibold">Chats</h2>
-                  <button type="button" className="btn btn-sm btn-primary" onClick={handleNewChat}>
-                    New
+                  <h2 className={`font-semibold ${sidebarMinimized ? 'hidden' : 'block'}`}>AI Robot</h2>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => setSidebarMinimized(!sidebarMinimized)}
+                    title={sidebarMinimized ? "Expand sidebar" : "Minimize sidebar"}
+                  >
+                    {sidebarMinimized ? '→' : '←'}
                   </button>
                 </div>
 
-                {loadingConversations ? (
-                  <div className="flex justify-center py-6">
-                    <span className="loading loading-spinner" />
-                  </div>
-                ) : conversations.length ? (
-                  <div className="space-y-2 max-h-[60vh] overflow-y-auto">
-                    {conversations.map((c) => (
-                      <div
-                        key={c.id}
-                        className={`flex items-center gap-2 rounded-lg border border-base-300 p-2 cursor-pointer ${
-                          conversationId === c.id ? "bg-base-100" : "bg-base-200"
-                        }`}
+                {!sidebarMinimized && (
+                  <div className="space-y-3">
+                    <p className="text-xs opacity-50 mb-2">Suggestions:</p>
+                    {ROUTES.map((r) => (
+                      <Link
+                        key={r.path}
+                        to={r.path}
+                        className={`block text-sm transition-opacity hover:opacity-100 ${activeTab === r.path ? 'opacity-90 font-medium' : 'opacity-60'
+                          }`}
                       >
-                        <button
-                          type="button"
-                          className="flex-1 text-left"
-                          onClick={() => setConversationId(String(c.id))}
-                        >
-                          <div className="text-sm font-medium truncate">{c.title || "New chat"}</div>
-                          <div className="text-xs opacity-60">{new Date(c.updatedAt || c.createdAt || Date.now()).toLocaleString()}</div>
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-xs"
-                          onClick={() => handleDeleteChat(String(c.id))}
-                        >
-                          Delete
-                        </button>
-                      </div>
+                        {r.label === "Home" ? "Job Interview" :
+                          r.label === "Interview" ? "Exercises" :
+                            r.label === "English Fluency" ? "English Proficiency" :
+                              r.label === "Language Learning" ? "Mathematics" :
+                                r.label === "Programming" ? "Programming" : r.label}
+                      </Link>
                     ))}
                   </div>
-                ) : (
-                  <div className="text-sm opacity-70">No chats yet. Create a new one.</div>
                 )}
               </div>
             </div>
           </div>
 
-          <div className="flex-1">
+          <div className="flex-1 relative">
             <div className="card bg-base-200 border border-base-300 h-full">
               <div className="card-body p-4 gap-4">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div>
-                    <h2 className="font-semibold">Conversation</h2>
-                    <p className="text-sm opacity-70">Voice-only. Tap the mic to talk.</p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      className={`btn btn-circle ${voiceModeOn ? "btn-error ring ring-error ring-offset-2 ring-offset-base-200" : "btn-primary"}`}
-                      disabled={isTranscribing || isResponding}
-                      onClick={toggleVoiceMode}
-                      aria-pressed={voiceModeOn}
-                      title={voiceModeOn ? "Voice OFF" : "Voice ON"}
-                    >
-                      {voiceModeOn ? (
-                        <span className="relative">
-                          {isRecording ? (
-                            <span className="absolute -inset-2 rounded-full bg-error/30 animate-ping" />
-                          ) : null}
-                          <Mic className="size-5 relative" />
-                        </span>
-                      ) : (
-                        <MicOff className="size-5" />
-                      )}
-                    </button>
-
-                    {voiceModeOn && isRecording ? (
-                      <button type="button" className="btn btn-outline" onClick={stopRecording}>
-                        Stop
-                      </button>
-                    ) : null}
-
-                    <div className="text-sm opacity-70">
-                      {isTranscribing
-                        ? "Transcribing..."
-                        : isResponding
-                          ? "AI responding..."
-                          : voiceModeOn && isRecording
-                            ? "Listening (max 30s)"
-                            : voiceModeOn
-                              ? "Voice mode is ON"
-                              : "Voice mode is OFF"}
-                    </div>
-                  </div>
+                {/* Voice Button - Fixed Right */}
+                <div className="absolute top-4 right-4 z-10">
+                  <button
+                    type="button"
+                    className={`btn btn-circle ${voiceModeOn ? "btn-error ring ring-error ring-offset-2 ring-offset-base-200" : "btn-primary"}`}
+                    disabled={isTranscribing || isResponding}
+                    onClick={toggleVoiceMode}
+                    aria-pressed={voiceModeOn}
+                    title={voiceModeOn ? "Voice OFF" : "Voice ON"}
+                  >
+                    {voiceModeOn ? (
+                      <span className="relative">
+                        {isRecording ? (
+                          <span className="absolute -inset-2 rounded-full bg-error/30 animate-ping" />
+                        ) : null}
+                        <Mic className="size-5 relative" />
+                      </span>
+                    ) : (
+                      <MicOff className="size-5" />
+                    )}
+                  </button>
                 </div>
 
+                {/* Live Transcription Bar */}
+                {showTranscription && liveTranscription && (
+                  <div className="bg-base-300 rounded-lg p-3 border border-base-content/10 animate-fade-in">
+                    <p className="text-xs opacity-50 mb-1">You said:</p>
+                    <div className="text-sm opacity-80 line-clamp-3 overflow-hidden">
+                      {liveTranscription}
+                    </div>
+                  </div>
+                )}
+
+                {/* Chat Messages Area */}
                 <div className="min-h-[45vh] max-h-[65vh] overflow-y-auto rounded-lg border border-base-300 bg-base-100 p-3 space-y-2">
                   {loadingConversation ? (
                     <div className="flex justify-center py-10">
@@ -852,8 +834,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                       </div>
                     ))
                   ) : (
-                    <div className="text-sm opacity-70">
-                      Start speaking to the AI Robot on the {moduleLabel} page.
+                    <div className="flex items-center justify-center h-full">
+                      <p className="text-lg opacity-40 text-center">Get your chatting Here</p>
                     </div>
                   )}
                 </div>
