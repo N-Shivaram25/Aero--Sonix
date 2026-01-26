@@ -91,6 +91,9 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [sidebarMinimized, setSidebarMinimized] = useState(false);
   const [liveTranscription, setLiveTranscription] = useState("");
   const [showTranscription, setShowTranscription] = useState(false);
+
+  // Web Speech API for real-time transcription display
+  const recognitionRef = useRef(null);
   const voiceSampleStopTimerRef = useRef(null);
 
   const voiceSamplesTotalSeconds = useMemo(() => {
@@ -302,6 +305,16 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
           // ignore
         }
 
+        // Stop Web Speech API
+        try {
+          if (recognitionRef.current) {
+            recognitionRef.current.stop();
+            recognitionRef.current = null;
+          }
+        } catch {
+          // ignore
+        }
+
         setIsRecording(false);
         setRecorder(null);
 
@@ -310,6 +323,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
         if (!blob || !blob.size) {
           toast.error("Recording failed");
+          setShowTranscription(false);
+          setLiveTranscription("");
           return;
         }
         await processVoiceChat(blob);
@@ -318,6 +333,59 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       rec.start();
       setRecorder(rec);
       setIsRecording(true);
+
+      // Start Web Speech API for real-time transcription display
+      try {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+          const recognition = new SpeechRecognition();
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.lang = 'en-US';
+
+          recognition.onstart = () => {
+            setShowTranscription(true);
+            setLiveTranscription("");
+          };
+
+          recognition.onresult = (event) => {
+            let interimTranscript = '';
+            let finalTranscript = '';
+
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+              const transcript = event.results[i][0].transcript;
+              if (event.results[i].isFinal) {
+                finalTranscript += transcript + ' ';
+              } else {
+                interimTranscript += transcript;
+              }
+            }
+
+            // Update live transcription with both final and interim results
+            setLiveTranscription((prev) => {
+              const updated = (prev + finalTranscript + interimTranscript).trim();
+              return updated;
+            });
+          };
+
+          recognition.onerror = (event) => {
+            console.error('Speech recognition error:', event.error);
+            // Don't show error to user, just continue with audio recording
+          };
+
+          recognition.onend = () => {
+            // Recognition ended, but we'll keep the transcription visible
+          };
+
+          recognition.start();
+          recognitionRef.current = recognition;
+        } else {
+          console.warn('Web Speech API not supported, transcription will show after recording');
+        }
+      } catch (e) {
+        console.error('Failed to start speech recognition:', e);
+        // Continue with audio recording even if speech recognition fails
+      }
 
       stopTimerRef.current = setTimeout(() => {
         try {
@@ -328,6 +396,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       }, VOICE_CHAT_MAX_MS);
     } catch (e) {
       toast.error(e?.message || "Microphone access denied");
+      setShowTranscription(false);
+      setLiveTranscription("");
     }
   };
 
@@ -338,6 +408,17 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         clearTimeout(stopTimerRef.current);
         stopTimerRef.current = null;
       }
+
+      // Stop Web Speech API
+      try {
+        if (recognitionRef.current) {
+          recognitionRef.current.stop();
+          recognitionRef.current = null;
+        }
+      } catch {
+        // ignore
+      }
+
       recorder.stop();
     } catch {
       // ignore
@@ -490,7 +571,20 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       } catch {
         // ignore
       }
+
+      // Clean up Web Speech API
+      try {
+        if (recognitionRef.current) {
+          recognitionRef.current.stop();
+          recognitionRef.current = null;
+        }
+      } catch {
+        // ignore
+      }
+
       stopSpeaking();
+      setShowTranscription(false);
+      setLiveTranscription("");
       return;
     }
 
