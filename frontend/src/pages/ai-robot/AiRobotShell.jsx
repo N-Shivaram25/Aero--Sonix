@@ -426,6 +426,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
 
       // Avoid spamming STT with tiny recordings
       if (!blob || blob.size < 1500) {
+        console.warn("⚠️ Recording too small, skipping...");
         if (voiceModeOn && token === voiceModeTokenRef.current) {
           setTimeout(() => {
             if (!voiceModeOn) return;
@@ -436,18 +437,27 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         return;
       }
 
+      console.log("🎤 Starting voice chat process...");
+      console.log("📦 Audio blob size:", blob.size, "bytes");
+
       setIsTranscribing(true);
       setShowTranscription(true);
+
       const sttRes = await (async () => {
         const maxAttempts = 3;
         let delayMs = 1200;
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
           try {
-            return await aiRobotStt({ audioBlob: blob });
+            console.log(`📝 Attempt ${attempt}: Sending to OpenAI Whisper...`);
+            const result = await aiRobotStt({ audioBlob: blob });
+            console.log("✅ Whisper transcription successful");
+            return result;
           } catch (err) {
+            console.error(`❌ Whisper attempt ${attempt} failed:`, err);
             const status = err?.response?.status;
             if (status === 429 && attempt < maxAttempts) {
-              toast.error(`Too many requests. Retrying in ${Math.round(delayMs / 1000)}s...`);
+              const waitTime = Math.round(delayMs / 1000);
+              toast.error(`Too many requests. Retrying in ${waitTime}s...`);
               await new Promise((r) => setTimeout(r, delayMs));
               delayMs *= 2;
               continue;
@@ -457,13 +467,16 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         }
         return null;
       })();
+
       const text = String(sttRes?.text || "").trim();
+      console.log("📝 Transcribed text:", text);
 
       // Display transcription in the horizontal bar
       setLiveTranscription(text);
 
       if (!text) {
-        toast.error("Could not transcribe audio");
+        console.error("❌ No text transcribed from audio");
+        toast.error("Could not transcribe audio. Please speak clearly and try again.");
         setShowTranscription(false);
         setLiveTranscription("");
         if (voiceModeOn && token === voiceModeTokenRef.current) {
@@ -476,15 +489,66 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         return;
       }
 
-      const id = await ensureConversation();
+      console.log("💬 Creating/getting conversation...");
+      let id;
+      try {
+        id = await ensureConversation();
+        console.log("✅ Conversation ID:", id);
+      } catch (convError) {
+        console.error("❌ Failed to create conversation:", convError);
+        toast.error("Failed to create conversation. Please try again.");
+        setShowTranscription(false);
+        setLiveTranscription("");
+        return;
+      }
 
       setMessages((prev) => [...prev, { role: "user", text }]);
+      console.log("✅ Added user message to chat");
 
       setIsResponding(true);
-      const chatRes = await aiRobotSendConversationMessage({ conversationId: id, message: text, language });
+      console.log("🤖 Sending to ChatGPT...");
+      console.log("   - Conversation ID:", id);
+      console.log("   - Message:", text);
+      console.log("   - Language:", language);
+
+      let chatRes;
+      try {
+        chatRes = await aiRobotSendConversationMessage({
+          conversationId: id,
+          message: text,
+          language
+        });
+        console.log("✅ ChatGPT response received");
+      } catch (chatError) {
+        console.error("❌ ChatGPT API error:", chatError);
+        console.error("   - Status:", chatError?.response?.status);
+        console.error("   - Message:", chatError?.response?.data?.message);
+        console.error("   - Full error:", chatError);
+
+        const errorMsg = chatError?.response?.data?.message || chatError?.message || "Failed to get AI response";
+        toast.error(`AI Error: ${errorMsg}`);
+
+        setShowTranscription(false);
+        setLiveTranscription("");
+        setIsResponding(false);
+        return;
+      }
+
       const reply = String(chatRes?.reply || "").trim();
+      console.log("🤖 AI Reply:", reply);
+
+      if (!reply) {
+        console.warn("⚠️ Empty reply from AI");
+        toast.error("AI returned empty response. Please try again.");
+        setShowTranscription(false);
+        setLiveTranscription("");
+        setIsResponding(false);
+        return;
+      }
 
       setMessages((prev) => [...prev, { role: "assistant", text: reply }]);
+      console.log("✅ Added AI response to chat");
+
       await loadConversations();
 
       // Hide transcription immediately after getting response
@@ -499,17 +563,28 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       // Try to play TTS, but don't fail if it doesn't work
       try {
         if (selectedVoiceId) {
+          console.log("🔊 Playing TTS with voice:", selectedVoiceId);
           const ttsRes = await aiRobotTts({ text: reply, voiceId: selectedVoiceId });
           if (voiceModeOn && voiceModeTokenRef.current === token) {
             playAudioBuffer(ttsRes);
+            console.log("✅ TTS playback started");
           }
+        } else {
+          console.warn("⚠️ No voice selected, skipping TTS");
         }
       } catch (ttsError) {
-        console.error("TTS failed:", ttsError);
+        console.error("❌ TTS failed:", ttsError);
         // Continue without audio - the text response is already shown
         setIsResponding(false);
       }
     } catch (e) {
+      console.error("❌ Voice chat error:", e);
+      console.error("   - Error type:", e?.constructor?.name);
+      console.error("   - Error message:", e?.message);
+      console.error("   - Response status:", e?.response?.status);
+      console.error("   - Response data:", e?.response?.data);
+      console.error("   - Full error object:", e);
+
       const status = e?.response?.status;
       if (status === 429) {
         toast.error("Too many requests. Please wait a moment, then turn Voice ON again.");
@@ -520,7 +595,11 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         setLiveTranscription("");
         return;
       }
-      toast.error(e?.response?.data?.message || e?.message || "Voice chat failed");
+
+      const errorMessage = e?.response?.data?.message || e?.message || "Voice chat failed";
+      toast.error(`Error: ${errorMessage}`);
+      console.error("🔴 Showing error to user:", errorMessage);
+
       setShowTranscription(false);
       setLiveTranscription("");
     } finally {
@@ -528,6 +607,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       if (!aiSpeakingRef.current) {
         setIsResponding(false);
       }
+      console.log("🏁 Voice chat process completed");
     }
   };
 
@@ -842,7 +922,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
             <div className="card bg-base-200 border border-base-300 h-full">
               <div className="card-body p-4 gap-4">
                 {/* Voice Button - Fixed Right */}
-                <div className="absolute top-4 right-4 z-10">
+                <div className="absolute top-4 right-4 z-10 flex flex-col gap-2 items-center">
                   <button
                     type="button"
                     className={`btn btn-circle ${voiceModeOn ? "btn-error ring ring-error ring-offset-2 ring-offset-base-200" : "btn-primary"}`}
@@ -862,6 +942,18 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                       <MicOff className="size-5" />
                     )}
                   </button>
+
+                  {/* Completed Button - Shows when recording */}
+                  {isRecording && (
+                    <button
+                      type="button"
+                      className="btn btn-success btn-sm"
+                      onClick={stopRecording}
+                      title="Complete and get AI response"
+                    >
+                      Completed
+                    </button>
+                  )}
                 </div>
 
                 {/* Live Transcription Bar */}
