@@ -254,10 +254,10 @@ export async function aiRobotSendMessage({ message, module, language }) {
   return response.data;
 }
 
-export async function aiRobotTts({ text, voiceId }) {
+export async function aiRobotTts({ text, voiceId, voiceGender }) {
   const response = await axiosInstance.post(
     "/ai-robot/tts",
-    { text, voiceId },
+    { text, voiceId, voiceGender },
     {
       responseType: "arraybuffer",
     }

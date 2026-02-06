@@ -126,9 +126,15 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [translateEnabled, setTranslateEnabled] = useState(false);
   const [translateSourceLanguage, setTranslateSourceLanguage] = useState("Auto");
   const [translateTargetLanguage, setTranslateTargetLanguage] = useState("Telugu");
+  const [translateVoiceGender, setTranslateVoiceGender] = useState("Male");
   const [translatedText, setTranslatedText] = useState("");
   const [isTranslating, setIsTranslating] = useState(false);
   const translateReqTokenRef = useRef(0);
+  const [translateSettingsModalOpen, setTranslateSettingsModalOpen] = useState(false);
+
+  const translateAudioRef = useRef(null);
+  const translateSpeakTokenRef = useRef(0);
+  const lastSpokenTranslationRef = useRef("");
 
   const [voiceStartModalOpen, setVoiceStartModalOpen] = useState(false);
   const [voiceStartWantsTranslate, setVoiceStartWantsTranslate] = useState(false);
@@ -312,6 +318,61 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
 
     return () => clearTimeout(id);
   }, [liveTranscription, translateTargetLanguage, translateSourceLanguage, translateEnabled, showTranscription]);
+
+  useEffect(() => {
+    if (!translateEnabled) return;
+    if (!showTranscription) return;
+    if (isTranslating) return;
+    const text = String(translatedText || "").trim();
+    if (!text) return;
+    if (text === lastSpokenTranslationRef.current) return;
+
+    const token = ++translateSpeakTokenRef.current;
+    const id = setTimeout(async () => {
+      try {
+        if (translateSpeakTokenRef.current !== token) return;
+        const buf = await aiRobotTts({
+          text,
+          voiceGender: translateVoiceGender,
+        });
+        if (translateSpeakTokenRef.current !== token) return;
+        if (!buf) return;
+
+        const blob = new Blob([buf], { type: "audio/mpeg" });
+        const url = URL.createObjectURL(blob);
+        const el = translateAudioRef.current;
+        if (!el) return;
+
+        try {
+          el.pause();
+          el.currentTime = 0;
+        } catch {
+          // ignore
+        }
+
+        el.src = url;
+        el.onended = () => {
+          URL.revokeObjectURL(url);
+        };
+        const p = el.play();
+        if (p && typeof p.catch === "function") {
+          p.catch(() => {
+            try {
+              URL.revokeObjectURL(url);
+            } catch {
+              // ignore
+            }
+          });
+        }
+
+        lastSpokenTranslationRef.current = text;
+      } catch {
+        // ignore
+      }
+    }, 800);
+
+    return () => clearTimeout(id);
+  }, [translatedText, translateEnabled, showTranscription, isTranslating, translateVoiceGender]);
 
   useEffect(() => {
     return () => {
@@ -1177,7 +1238,15 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                       <button
                         type="button"
                         className={`btn btn-sm ${translateEnabled ? "btn-error" : "btn-outline"}`}
-                        onClick={() => setTranslateEnabled((v) => !v)}
+                        onClick={() => {
+                          if (translateEnabled) {
+                            setTranslateEnabled(false);
+                            setTranslatedText("");
+                            lastSpokenTranslationRef.current = "";
+                            return;
+                          }
+                          setTranslateSettingsModalOpen(true);
+                        }}
                       >
                         Translate
                       </button>
@@ -1265,6 +1334,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                 </div>
 
                 <audio ref={audioRef} />
+                <audio ref={translateAudioRef} />
               </div>
             </div>
           </div>
@@ -1405,6 +1475,28 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                 </select>
               </div>
 
+              <div className="mt-4">
+                <div className="text-sm font-medium mb-2">Default Translation</div>
+                <div className="join w-full">
+                  <button
+                    type="button"
+                    className={`btn join-item flex-1 ${translateVoiceGender === "Male" ? "btn-primary" : "btn-outline"}`}
+                    disabled={!voiceStartWantsTranslate}
+                    onClick={() => setTranslateVoiceGender("Male")}
+                  >
+                    Male
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn join-item flex-1 ${translateVoiceGender === "Female" ? "btn-primary" : "btn-outline"}`}
+                    disabled={!voiceStartWantsTranslate}
+                    onClick={() => setTranslateVoiceGender("Female")}
+                  >
+                    Female
+                  </button>
+                </div>
+              </div>
+
               <div className="modal-action">
                 <button type="button" className="btn btn-ghost" onClick={() => setVoiceStartModalOpen(false)}>
                   Cancel
@@ -1416,6 +1508,87 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
             </div>
             <form method="dialog" className="modal-backdrop">
               <button type="button" onClick={() => setVoiceStartModalOpen(false)}>
+                close
+              </button>
+            </form>
+          </dialog>
+        ) : null}
+
+        {translateSettingsModalOpen ? (
+          <dialog className="modal modal-open">
+            <div className="modal-box">
+              <h3 className="font-bold text-lg">Translation Settings</h3>
+
+              <div className="mt-4">
+                <div className="text-sm font-medium mb-2">Input language</div>
+                <select
+                  className="select select-bordered w-full"
+                  value={translateSourceLanguage}
+                  onChange={(e) => setTranslateSourceLanguage(e.target.value)}
+                >
+                  {TRANSLATE_LANGUAGE_OPTIONS.map((lang) => (
+                    <option key={`tr-modal-src-${lang}`} value={lang}>
+                      {lang}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mt-4">
+                <div className="text-sm font-medium mb-2">Target language</div>
+                <select
+                  className="select select-bordered w-full"
+                  value={translateTargetLanguage}
+                  onChange={(e) => setTranslateTargetLanguage(e.target.value)}
+                >
+                  {TRANSLATE_LANGUAGE_OPTIONS.filter((l) => l !== "Auto").map((lang) => (
+                    <option key={`tr-modal-to-${lang}`} value={lang}>
+                      {lang}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mt-4">
+                <div className="text-sm font-medium mb-2">Default Translation</div>
+                <div className="join w-full">
+                  <button
+                    type="button"
+                    className={`btn join-item flex-1 ${translateVoiceGender === "Male" ? "btn-primary" : "btn-outline"}`}
+                    onClick={() => setTranslateVoiceGender("Male")}
+                  >
+                    Male
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn join-item flex-1 ${translateVoiceGender === "Female" ? "btn-primary" : "btn-outline"}`}
+                    onClick={() => setTranslateVoiceGender("Female")}
+                  >
+                    Female
+                  </button>
+                </div>
+              </div>
+
+              <div className="modal-action">
+                <button type="button" className="btn btn-ghost" onClick={() => setTranslateSettingsModalOpen(false)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => {
+                    setTranslateSettingsModalOpen(false);
+                    setTranslateEnabled(true);
+                    setTranslatedText("");
+                    lastSpokenTranslationRef.current = "";
+                  }}
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+            <form method="dialog" className="modal-backdrop">
+              <button type="button" onClick={() => setTranslateSettingsModalOpen(false)}>
                 close
               </button>
             </form>

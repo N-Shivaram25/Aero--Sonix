@@ -530,20 +530,32 @@ export async function tts(req, res) {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
-    const { text, voiceId } = req.body || {};
+    const { text, voiceId, voiceGender } = req.body || {};
 
     if (!text || typeof text !== "string") {
       return res.status(400).json({ message: "text is required" });
     }
 
-    const selectedVoiceId = String(voiceId || "").trim();
+    const explicitVoiceId = String(voiceId || "").trim();
+    const gender = String(voiceGender || "").trim().toLowerCase();
+    const selectedVoiceId = explicitVoiceId
+      ? explicitVoiceId
+      : gender === "male"
+        ? String(process.env.MALE_VOICE_ID || "").trim()
+        : gender === "female"
+          ? String(process.env.FEMALE_VOICE_ID || "").trim()
+          : "";
+
     if (!selectedVoiceId) {
-      return res.status(400).json({ message: "voiceId is required" });
+      return res.status(400).json({ message: "voiceId or voiceGender is required" });
     }
 
-    if (!isDefaultVoiceId(selectedVoiceId)) {
-      const owned = await AiRobotVoice.findOne({ userId, voiceId: selectedVoiceId }).select("_id");
-      if (!owned) return res.status(404).json({ message: "Voice not found" });
+    // Only enforce ownership if the user provided a specific voiceId (custom voice).
+    if (explicitVoiceId) {
+      if (!isDefaultVoiceId(selectedVoiceId)) {
+        const owned = await AiRobotVoice.findOne({ userId, voiceId: selectedVoiceId }).select("_id");
+        if (!owned) return res.status(404).json({ message: "Voice not found" });
+      }
     }
 
     let audio;
