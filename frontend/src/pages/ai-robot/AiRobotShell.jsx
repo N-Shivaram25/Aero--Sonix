@@ -127,16 +127,22 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [translateSourceLanguage, setTranslateSourceLanguage] = useState("Auto");
   const [translateTargetLanguage, setTranslateTargetLanguage] = useState("Telugu");
   const [translateVoiceGender, setTranslateVoiceGender] = useState("Male");
-  const [translatedText, setTranslatedText] = useState("");
   const [isTranslating, setIsTranslating] = useState(false);
   const translateReqTokenRef = useRef(0);
+
+  const [inputBaseText, setInputBaseText] = useState("");
+  const [inputNewText, setInputNewText] = useState("");
+  const [translatedBaseText, setTranslatedBaseText] = useState("");
+  const [translatedNewText, setTranslatedNewText] = useState("");
+
+  const translatedFullRef = useRef("");
+  const lastTranslatedForInputRef = useRef("");
   const [translateSettingsModalOpen, setTranslateSettingsModalOpen] = useState(false);
 
   const translateAudioRef = useRef(null);
   const translateSpeakTokenRef = useRef(0);
-  const lastProcessedInputRef = useRef("");
-  const pendingTranslatedForSpeakRef = useRef("");
-  const silenceTimerRef = useRef(null);
+  const lastSpokenTranslationRef = useRef("");
+  const isTranslateSpeakingRef = useRef(false);
 
   const [voiceStartModalOpen, setVoiceStartModalOpen] = useState(false);
   const [voiceStartWantsTranslate, setVoiceStartWantsTranslate] = useState(false);
@@ -279,126 +285,230 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     }
   }, [translateSourceLanguage, isRecording, recorder]);
 
+  const commonPrefixIndex = (a, b) => {
+    const s1 = String(a || "");
+    const s2 = String(b || "");
+    const max = Math.min(s1.length, s2.length);
+    let i = 0;
+    while (i < max && s1[i] === s2[i]) i += 1;
+    return i;
+  };
+
   useEffect(() => {
-    if (!showTranscription || !translateEnabled) {
-      setTranslatedText("");
+    if (!showTranscription) {
       setIsTranslating(false);
-      lastProcessedInputRef.current = "";
-      pendingTranslatedForSpeakRef.current = "";
-      try {
-        if (silenceTimerRef.current) {
-          clearTimeout(silenceTimerRef.current);
-          silenceTimerRef.current = null;
-        }
-      } catch {
-        // ignore
-      }
+      setInputBaseText("");
+      setInputNewText("");
+      setTranslatedBaseText("");
+      setTranslatedNewText("");
+      translatedFullRef.current = "";
+      lastTranslatedForInputRef.current = "";
+      return;
+    }
+    if (!translateEnabled) {
+      setIsTranslating(false);
+      setInputBaseText("");
+      setInputNewText("");
+      setTranslatedBaseText("");
+      setTranslatedNewText("");
+      translatedFullRef.current = "";
+      lastTranslatedForInputRef.current = "";
       return;
     }
 
-    const current = String(liveTranscription || "");
-    const prev = String(lastProcessedInputRef.current || "");
-    if (!current.trim()) {
-      lastProcessedInputRef.current = "";
-      pendingTranslatedForSpeakRef.current = "";
-      setTranslatedText("");
+    const englishText = String(liveTranscription || "").trim();
+    if (!englishText) {
+      setIsTranslating(false);
+      setInputBaseText("");
+      setInputNewText("");
+      setTranslatedBaseText("");
+      setTranslatedNewText("");
+      translatedFullRef.current = "";
+      lastTranslatedForInputRef.current = "";
       return;
     }
 
-    let delta = "";
-    if (prev && current.startsWith(prev)) {
-      delta = current.slice(prev.length);
-    } else if (!prev) {
-      delta = current;
-    } else {
-      delta = current;
-      setTranslatedText("");
-      pendingTranslatedForSpeakRef.current = "";
-    }
+    // Incremental highlight for input text
+    const prevInput = lastTranslatedForInputRef.current;
+    const idx = commonPrefixIndex(prevInput, englishText);
+    const base = englishText.slice(0, idx).trimStart();
+    const newlyAdded = englishText.slice(idx).trim();
+    setInputBaseText(base);
+    setInputNewText(newlyAdded);
 
-    delta = String(delta || "").trim();
-    if (!delta) return;
-    lastProcessedInputRef.current = current;
+    // Translate only the newly added segment and append to translated full.
+    // This keeps the translation continuous and lets us speak only the new part.
+    if (!newlyAdded) {
+      setTranslatedBaseText(translatedFullRef.current);
+      setTranslatedNewText("");
+      lastTranslatedForInputRef.current = englishText;
+      return;
+    }
 
     const token = ++translateReqTokenRef.current;
     const id = setTimeout(async () => {
       try {
         setIsTranslating(true);
         const res = await aiRobotTranslate({
-          text: delta,
+          text: newlyAdded,
           targetLanguage: translateTargetLanguage,
           sourceLanguage: translateSourceLanguage,
         });
         if (translateReqTokenRef.current !== token) return;
-        const translatedDelta = String(res?.translatedText || "").trim();
-        if (!translatedDelta) return;
+        const segment = String(res?.translatedText || "").trim();
+        const prev = String(translatedFullRef.current || "").trim();
+        const nextFull = segment ? (prev ? `${prev} ${segment}` : segment) : prev;
+        translatedFullRef.current = nextFull;
 
-        setTranslatedText((prevText) => {
-          const base = String(prevText || "").trim();
-          return base ? `${base} ${translatedDelta}`.trim() : translatedDelta;
-        });
-
-        pendingTranslatedForSpeakRef.current = `${pendingTranslatedForSpeakRef.current} ${translatedDelta}`.trim();
-
-        try {
-          if (silenceTimerRef.current) {
-            clearTimeout(silenceTimerRef.current);
-            silenceTimerRef.current = null;
-          }
-        } catch {
-          // ignore
-        }
-
-        silenceTimerRef.current = setTimeout(async () => {
-          const speakText = String(pendingTranslatedForSpeakRef.current || "").trim();
-          if (!speakText) return;
-          pendingTranslatedForSpeakRef.current = "";
-          const speakToken = ++translateSpeakTokenRef.current;
-          try {
-            const buf = await aiRobotTts({
-              text: speakText,
-              voiceGender: translateVoiceGender,
-            });
-            if (translateSpeakTokenRef.current !== speakToken) return;
-            if (!buf) return;
-            const blob = new Blob([buf], { type: "audio/mpeg" });
-            const url = URL.createObjectURL(blob);
-            const el = translateAudioRef.current;
-            if (!el) return;
-            try {
-              el.pause();
-              el.currentTime = 0;
-            } catch {
-              // ignore
-            }
-            el.src = url;
-            el.onended = () => {
-              URL.revokeObjectURL(url);
-            };
-            const p = el.play();
-            if (p && typeof p.catch === "function") {
-              p.catch(() => {
-                try {
-                  URL.revokeObjectURL(url);
-                } catch {
-                  // ignore
-                }
-              });
-            }
-          } catch {
-            // ignore
-          }
-        }, 5000);
+        setTranslatedBaseText(prev);
+        setTranslatedNewText(segment);
+        lastTranslatedForInputRef.current = englishText;
       } catch {
         if (translateReqTokenRef.current !== token) return;
+        setTranslatedBaseText(translatedFullRef.current);
+        setTranslatedNewText("");
       } finally {
         if (translateReqTokenRef.current !== token) return;
         setIsTranslating(false);
       }
-    }, 250);
+    }, 450);
 
     return () => clearTimeout(id);
-  }, [liveTranscription, translateTargetLanguage, translateSourceLanguage, translateEnabled, showTranscription, translateVoiceGender]);
+  }, [liveTranscription, translateTargetLanguage, translateSourceLanguage, translateEnabled, showTranscription]);
+
+  useEffect(() => {
+    if (!translateEnabled) return;
+    if (!showTranscription) return;
+    if (isTranslating) return;
+    if (isTranslateSpeakingRef.current) return;
+
+    const text = String(translatedNewText || "").trim();
+    if (!text) return;
+    if (text === lastSpokenTranslationRef.current) return;
+
+    const token = ++translateSpeakTokenRef.current;
+    const id = setTimeout(async () => {
+      try {
+        if (translateSpeakTokenRef.current !== token) return;
+
+        // Pause recognition while speaking to reduce echo.
+        try {
+          if (recognitionRef.current) recognitionRef.current.stop();
+        } catch {
+          // ignore
+        }
+
+        isTranslateSpeakingRef.current = true;
+
+        const buf = await aiRobotTts({
+          text,
+          voiceGender: translateVoiceGender,
+        });
+        if (translateSpeakTokenRef.current !== token) return;
+        if (!buf) return;
+
+        const blob = new Blob([buf], { type: "audio/mpeg" });
+        const url = URL.createObjectURL(blob);
+        const el = translateAudioRef.current;
+        if (!el) return;
+
+        try {
+          el.pause();
+          el.currentTime = 0;
+        } catch {
+          // ignore
+        }
+
+        el.src = url;
+        el.onended = () => {
+          isTranslateSpeakingRef.current = false;
+          URL.revokeObjectURL(url);
+
+          // Resume recognition right after speaking ends
+          try {
+            if (!voiceModeOnRef.current) return;
+            if (!isRecording) return;
+            const rec = recorder;
+            if (!rec || rec.state === "inactive") return;
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) return;
+
+            const sessionToken = Date.now();
+            recognitionSessionTokenRef.current = sessionToken;
+            const recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = toSpeechRecognitionLang(translateSourceLanguage);
+
+            recognition.onstart = () => {
+              setShowTranscription(true);
+            };
+
+            recognition.onresult = (event) => {
+              let interim = "";
+              for (let i = event.resultIndex; i < event.results.length; i += 1) {
+                const result = event.results[i];
+                const t = result?.[0]?.transcript || "";
+                if (result?.isFinal) {
+                  liveTranscriptFinalRef.current = `${liveTranscriptFinalRef.current} ${t}`.trim();
+                } else {
+                  interim += t;
+                }
+              }
+              const combined = `${liveTranscriptFinalRef.current} ${interim}`.trim();
+              setLiveTranscription(combined);
+            };
+
+            recognition.onerror = (event) => {
+              console.error("Speech recognition error:", event.error);
+            };
+
+            recognition.onend = () => {
+              try {
+                if (!voiceModeOnRef.current) return;
+                if (recognitionSessionTokenRef.current !== sessionToken) return;
+                if (rec.state === "inactive") return;
+                setTimeout(() => {
+                  try {
+                    if (!voiceModeOnRef.current) return;
+                    if (recognitionSessionTokenRef.current !== sessionToken) return;
+                    if (rec.state === "inactive") return;
+                    recognition.start();
+                  } catch {
+                    // ignore
+                  }
+                }, 250);
+              } catch {
+                // ignore
+              }
+            };
+
+            recognition.start();
+            recognitionRef.current = recognition;
+          } catch {
+            // ignore
+          }
+        };
+        const p = el.play();
+        if (p && typeof p.catch === "function") {
+          p.catch(() => {
+            try {
+              URL.revokeObjectURL(url);
+            } catch {
+              // ignore
+            }
+          });
+        }
+
+        lastSpokenTranslationRef.current = text;
+      } catch {
+        isTranslateSpeakingRef.current = false;
+        // ignore
+      }
+    }, 800);
+
+    return () => clearTimeout(id);
+  }, [translatedNewText, translateEnabled, showTranscription, isTranslating, translateVoiceGender, translateSourceLanguage, isRecording, recorder]);
 
   useEffect(() => {
     return () => {
@@ -939,7 +1049,12 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       setLiveTranscription("");
       liveTranscriptFinalRef.current = "";
       setTranslateEnabled(false);
-      setTranslatedText("");
+      setInputBaseText("");
+      setInputNewText("");
+      setTranslatedBaseText("");
+      setTranslatedNewText("");
+      translatedFullRef.current = "";
+      lastTranslatedForInputRef.current = "";
       return;
     }
 
@@ -956,7 +1071,13 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     try {
       setVoiceStartModalOpen(false);
       setTranslateEnabled(voiceStartWantsTranslate);
-      setTranslatedText("");
+      setInputBaseText("");
+      setInputNewText("");
+      setTranslatedBaseText("");
+      setTranslatedNewText("");
+      translatedFullRef.current = "";
+      lastTranslatedForInputRef.current = "";
+      lastSpokenTranslationRef.current = "";
       setShowTranscription(true);
       setLiveTranscription("");
       liveTranscriptFinalRef.current = "";
@@ -1257,7 +1378,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                   <div className="bg-base-300 rounded-lg p-3 border border-base-content/10 animate-fade-in">
                     <p className="text-xs opacity-50 mb-1">You said:</p>
                     <div className="text-sm opacity-80 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
-                      {liveTranscription}
+                      <span>{inputBaseText}</span>
+                      {inputNewText ? <span className="text-green-300">{inputBaseText ? ` ${inputNewText}` : inputNewText}</span> : null}
                     </div>
 
                     <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -1267,17 +1389,13 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                         onClick={() => {
                           if (translateEnabled) {
                             setTranslateEnabled(false);
-                            setTranslatedText("");
-                            lastProcessedInputRef.current = "";
-                            pendingTranslatedForSpeakRef.current = "";
-                            try {
-                              if (silenceTimerRef.current) {
-                                clearTimeout(silenceTimerRef.current);
-                                silenceTimerRef.current = null;
-                              }
-                            } catch {
-                              // ignore
-                            }
+                            setInputBaseText("");
+                            setInputNewText("");
+                            setTranslatedBaseText("");
+                            setTranslatedNewText("");
+                            translatedFullRef.current = "";
+                            lastTranslatedForInputRef.current = "";
+                            lastSpokenTranslationRef.current = "";
                             return;
                           }
                           setTranslateSettingsModalOpen(true);
@@ -1342,7 +1460,12 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                           {translateSourceLanguage} → {translateTargetLanguage}:
                         </p>
                         <div className="text-sm opacity-90 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
-                          {isTranslating ? "Translating..." : translatedText}
+                          <span>{translatedBaseText}</span>
+                          {translatedNewText ? (
+                            <span className="text-green-300">{translatedBaseText ? ` ${translatedNewText}` : translatedNewText}</span>
+                          ) : isTranslating ? (
+                            <span className="opacity-70"> Translating...</span>
+                          ) : null}
                         </div>
                       </div>
                     ) : null}
@@ -1614,17 +1737,13 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                   onClick={() => {
                     setTranslateSettingsModalOpen(false);
                     setTranslateEnabled(true);
-                    setTranslatedText("");
-                    lastProcessedInputRef.current = "";
-                    pendingTranslatedForSpeakRef.current = "";
-                    try {
-                      if (silenceTimerRef.current) {
-                        clearTimeout(silenceTimerRef.current);
-                        silenceTimerRef.current = null;
-                      }
-                    } catch {
-                      // ignore
-                    }
+                    setInputBaseText("");
+                    setInputNewText("");
+                    setTranslatedBaseText("");
+                    setTranslatedNewText("");
+                    translatedFullRef.current = "";
+                    lastTranslatedForInputRef.current = "";
+                    lastSpokenTranslationRef.current = "";
                   }}
                 >
                   Apply
