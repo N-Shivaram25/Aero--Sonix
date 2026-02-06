@@ -441,7 +441,7 @@ export async function translate(req, res) {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
-    const { text, targetLanguage } = req.body || {};
+    const { text, targetLanguage, sourceLanguage } = req.body || {};
     if (!text || typeof text !== "string") {
       return res.status(400).json({ message: "text is required" });
     }
@@ -460,6 +460,7 @@ export async function translate(req, res) {
       if (!v) return "";
       const key = v.toLowerCase();
       const map = {
+        auto: "auto",
         telugu: "te",
         hindi: "hi",
         spanish: "es",
@@ -475,9 +476,13 @@ export async function translate(req, res) {
       return "";
     };
 
+    const source = toGoogleLanguageCode(sourceLanguage);
     const target = toGoogleLanguageCode(targetLanguage);
     if (!target) {
       return res.status(400).json({ message: "Unsupported targetLanguage" });
+    }
+    if (sourceLanguage && !source) {
+      return res.status(400).json({ message: "Unsupported sourceLanguage" });
     }
 
     const url = `https://translation.googleapis.com/language/translate/v2?key=${encodeURIComponent(apiKey)}`;
@@ -488,6 +493,7 @@ export async function translate(req, res) {
       },
       body: JSON.stringify({
         q: cleanedText,
+        ...(source && source !== "auto" ? { source } : {}),
         target,
         format: "text",
       }),

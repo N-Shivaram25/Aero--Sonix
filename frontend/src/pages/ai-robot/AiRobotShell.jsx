@@ -32,6 +32,8 @@ const VOICE_CLONE_CLIP_MAX_MS = 30_000;
 const VOICE_CLONE_TOTAL_MAX_SECONDS = 60;
 
 const TRANSLATE_LANGUAGE_OPTIONS = [
+  "Auto",
+  "English",
   "Telugu",
   "Hindi",
   "Spanish",
@@ -105,6 +107,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [showTranscription, setShowTranscription] = useState(false);
 
   const [translateEnabled, setTranslateEnabled] = useState(false);
+  const [translateSourceLanguage, setTranslateSourceLanguage] = useState("Auto");
   const [translateTargetLanguage, setTranslateTargetLanguage] = useState("Telugu");
   const [translatedText, setTranslatedText] = useState("");
   const [isTranslating, setIsTranslating] = useState(false);
@@ -199,6 +202,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         const res = await aiRobotTranslate({
           text: englishText,
           targetLanguage: translateTargetLanguage,
+          sourceLanguage: translateSourceLanguage,
         });
         if (translateReqTokenRef.current !== token) return;
         setTranslatedText(String(res?.translatedText || ""));
@@ -212,7 +216,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     }, 450);
 
     return () => clearTimeout(id);
-  }, [liveTranscription, translateTargetLanguage, translateEnabled, showTranscription]);
+  }, [liveTranscription, translateTargetLanguage, translateSourceLanguage, translateEnabled, showTranscription]);
 
   useEffect(() => {
     return () => {
@@ -1082,7 +1086,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                           disabled={!translateEnabled}
                           tabIndex={0}
                         >
-                          {translateTargetLanguage}
+                          From: {translateSourceLanguage}
                         </button>
                         <ul
                           tabIndex={0}
@@ -1092,8 +1096,31 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                             <li key={`tr-${lang}`}>
                               <button
                                 type="button"
-                                onClick={() => setTranslateTargetLanguage(lang)}
+                                onClick={() => setTranslateSourceLanguage(lang)}
                               >
+                                {lang}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      <div className="dropdown">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline"
+                          disabled={!translateEnabled}
+                          tabIndex={0}
+                        >
+                          To: {translateTargetLanguage}
+                        </button>
+                        <ul
+                          tabIndex={0}
+                          className="dropdown-content menu bg-base-100 rounded-box z-[1] w-52 p-2 shadow"
+                        >
+                          {TRANSLATE_LANGUAGE_OPTIONS.filter((l) => l !== "Auto").map((lang) => (
+                            <li key={`tr-to-${lang}`}>
+                              <button type="button" onClick={() => setTranslateTargetLanguage(lang)}>
                                 {lang}
                               </button>
                             </li>
@@ -1104,7 +1131,9 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
 
                     {translateEnabled ? (
                       <div className="mt-2">
-                        <p className="text-xs opacity-50 mb-1">{translateTargetLanguage}:</p>
+                        <p className="text-xs opacity-50 mb-1">
+                          {translateSourceLanguage} → {translateTargetLanguage}:
+                        </p>
                         <div className="text-sm opacity-90 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
                           {isTranslating ? "Translating..." : translatedText}
                         </div>
@@ -1249,8 +1278,24 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                   onChange={(e) => setTranslateTargetLanguage(e.target.value)}
                   disabled={!voiceStartWantsTranslate}
                 >
-                  {TRANSLATE_LANGUAGE_OPTIONS.map((lang) => (
+                  {TRANSLATE_LANGUAGE_OPTIONS.filter((l) => l !== "Auto").map((lang) => (
                     <option key={`voice-start-${lang}`} value={lang}>
+                      {lang}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mt-4">
+                <div className="text-sm font-medium mb-2">Input language</div>
+                <select
+                  className="select select-bordered w-full"
+                  value={translateSourceLanguage}
+                  onChange={(e) => setTranslateSourceLanguage(e.target.value)}
+                  disabled={!voiceStartWantsTranslate}
+                >
+                  {TRANSLATE_LANGUAGE_OPTIONS.map((lang) => (
+                    <option key={`voice-start-src-${lang}`} value={lang}>
                       {lang}
                     </option>
                   ))}

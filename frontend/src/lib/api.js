@@ -244,8 +244,8 @@ export async function aiRobotStt({ audioBlob }) {
   return response.data;
 }
 
-export async function aiRobotTranslate({ text, targetLanguage }) {
-  const response = await axiosInstance.post("/ai-robot/translate", { text, targetLanguage });
+export async function aiRobotTranslate({ text, targetLanguage, sourceLanguage }) {
+  const response = await axiosInstance.post("/ai-robot/translate", { text, targetLanguage, sourceLanguage });
   return response.data;
 }
 
