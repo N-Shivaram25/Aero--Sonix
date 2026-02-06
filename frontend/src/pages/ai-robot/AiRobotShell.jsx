@@ -110,6 +110,9 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [isTranslating, setIsTranslating] = useState(false);
   const translateReqTokenRef = useRef(0);
 
+  const [voiceStartModalOpen, setVoiceStartModalOpen] = useState(false);
+  const [voiceStartWantsTranslate, setVoiceStartWantsTranslate] = useState(false);
+
   // Web Speech API for real-time transcription display
   const recognitionRef = useRef(null);
   const recognitionSessionTokenRef = useRef(0);
@@ -744,6 +747,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       stopSpeaking();
       setShowTranscription(false);
       setLiveTranscription("");
+      setTranslateEnabled(false);
+      setTranslatedText("");
       return;
     }
 
@@ -752,11 +757,25 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       return;
     }
 
-    setVoiceModeOn(true);
-    voiceModeOnRef.current = true;
-    voiceModeTokenRef.current += 1;
-    stopSpeaking();
-    await startRecording({ force: true });
+    setVoiceStartWantsTranslate(false);
+    setVoiceStartModalOpen(true);
+  };
+
+  const confirmVoiceStart = async () => {
+    try {
+      setVoiceStartModalOpen(false);
+      setTranslateEnabled(voiceStartWantsTranslate);
+      setTranslatedText("");
+      setVoiceModeOn(true);
+      voiceModeOnRef.current = true;
+      voiceModeTokenRef.current += 1;
+      stopSpeaking();
+      await startRecording({ force: true });
+    } catch (e) {
+      toast.error(e?.message || "Failed to start voice");
+      setVoiceModeOn(false);
+      voiceModeOnRef.current = false;
+    }
   };
 
   const openVoiceModal = () => {
@@ -1061,6 +1080,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                           type="button"
                           className="btn btn-sm btn-outline"
                           disabled={!translateEnabled}
+                          tabIndex={0}
                         >
                           {translateTargetLanguage}
                         </button>
@@ -1202,6 +1222,57 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
             </div>
           </div>
         </dialog>
+
+        {voiceStartModalOpen ? (
+          <dialog className="modal modal-open">
+            <div className="modal-box">
+              <h3 className="font-bold text-lg">Voice Settings</h3>
+
+              <div className="mt-4 flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium">Translation</div>
+                  <div className="text-xs opacity-60">Do you need translation while speaking?</div>
+                </div>
+                <input
+                  type="checkbox"
+                  className="toggle"
+                  checked={voiceStartWantsTranslate}
+                  onChange={(e) => setVoiceStartWantsTranslate(e.target.checked)}
+                />
+              </div>
+
+              <div className="mt-4">
+                <div className="text-sm font-medium mb-2">Target language</div>
+                <select
+                  className="select select-bordered w-full"
+                  value={translateTargetLanguage}
+                  onChange={(e) => setTranslateTargetLanguage(e.target.value)}
+                  disabled={!voiceStartWantsTranslate}
+                >
+                  {TRANSLATE_LANGUAGE_OPTIONS.map((lang) => (
+                    <option key={`voice-start-${lang}`} value={lang}>
+                      {lang}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="modal-action">
+                <button type="button" className="btn btn-ghost" onClick={() => setVoiceStartModalOpen(false)}>
+                  Cancel
+                </button>
+                <button type="button" className="btn btn-primary" onClick={confirmVoiceStart}>
+                  Start
+                </button>
+              </div>
+            </div>
+            <form method="dialog" className="modal-backdrop">
+              <button type="button" onClick={() => setVoiceStartModalOpen(false)}>
+                close
+              </button>
+            </form>
+          </dialog>
+        ) : null}
       </div>
     </div>
   );
