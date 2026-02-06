@@ -436,6 +436,47 @@ export async function stt(req, res) {
   }
 }
 
+export async function translate(req, res) {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+    const { text, targetLanguage } = req.body || {};
+    if (!text || typeof text !== "string") {
+      return res.status(400).json({ message: "text is required" });
+    }
+    if (!targetLanguage || typeof targetLanguage !== "string") {
+      return res.status(400).json({ message: "targetLanguage is required" });
+    }
+
+    const cleanedText = String(text).trim();
+    if (!cleanedText) return res.status(200).json({ success: true, translatedText: "" });
+
+    const openai = getOpenAIClient();
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a translation engine. Translate the user's text exactly and naturally. Return only the translated text with no extra words.",
+        },
+        {
+          role: "user",
+          content: `Translate to ${targetLanguage}. Text: ${cleanedText}`,
+        },
+      ],
+    });
+
+    const translatedText = completion?.choices?.[0]?.message?.content?.trim() || "";
+    return res.status(200).json({ success: true, translatedText });
+  } catch (error) {
+    console.error("Error in aiRobot translate controller", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+}
+
 const readerToBuffer = async (reader) => {
   const chunks = [];
   while (true) {

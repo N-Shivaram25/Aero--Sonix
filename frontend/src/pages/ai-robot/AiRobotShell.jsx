@@ -6,6 +6,7 @@ import { LANGUAGES } from "../../constants";
 import {
   aiRobotSendConversationMessage,
   aiRobotStt,
+  aiRobotTranslate,
   aiRobotTts,
   createAiRobotConversation,
   deleteAiRobotConversation,
@@ -29,6 +30,17 @@ const VOICE_CHAT_MAX_MS = 30_000;
 const VOICE_CLONE_MIN_SECONDS = 60;
 const VOICE_CLONE_CLIP_MAX_MS = 30_000;
 const VOICE_CLONE_TOTAL_MAX_SECONDS = 60;
+
+const TRANSLATE_LANGUAGE_OPTIONS = [
+  "Telugu",
+  "Hindi",
+  "Spanish",
+  "French",
+  "German",
+  "Tamil",
+  "Kannada",
+  "Malayalam",
+];
 
 const getSupportedMimeType = () => {
   for (const t of mimePreference) {
@@ -92,8 +104,15 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [liveTranscription, setLiveTranscription] = useState("");
   const [showTranscription, setShowTranscription] = useState(false);
 
+  const [translateEnabled, setTranslateEnabled] = useState(false);
+  const [translateTargetLanguage, setTranslateTargetLanguage] = useState("Telugu");
+  const [translatedText, setTranslatedText] = useState("");
+  const [isTranslating, setIsTranslating] = useState(false);
+  const translateReqTokenRef = useRef(0);
+
   // Web Speech API for real-time transcription display
   const recognitionRef = useRef(null);
+  const recognitionSessionTokenRef = useRef(0);
   const voiceSampleStopTimerRef = useRef(null);
 
   const voiceSamplesTotalSeconds = useMemo(() => {
@@ -150,6 +169,47 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   useEffect(() => {
     voiceModeOnRef.current = voiceModeOn;
   }, [voiceModeOn]);
+
+  useEffect(() => {
+    if (!showTranscription) {
+      setTranslatedText("");
+      setIsTranslating(false);
+      return;
+    }
+    if (!translateEnabled) {
+      setTranslatedText("");
+      setIsTranslating(false);
+      return;
+    }
+
+    const englishText = String(liveTranscription || "").trim();
+    if (!englishText) {
+      setTranslatedText("");
+      setIsTranslating(false);
+      return;
+    }
+
+    const token = ++translateReqTokenRef.current;
+    const id = setTimeout(async () => {
+      try {
+        setIsTranslating(true);
+        const res = await aiRobotTranslate({
+          text: englishText,
+          targetLanguage: translateTargetLanguage,
+        });
+        if (translateReqTokenRef.current !== token) return;
+        setTranslatedText(String(res?.translatedText || ""));
+      } catch {
+        if (translateReqTokenRef.current !== token) return;
+        setTranslatedText("");
+      } finally {
+        if (translateReqTokenRef.current !== token) return;
+        setIsTranslating(false);
+      }
+    }, 450);
+
+    return () => clearTimeout(id);
+  }, [liveTranscription, translateTargetLanguage, translateEnabled, showTranscription]);
 
   useEffect(() => {
     return () => {
@@ -338,6 +398,9 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       try {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (SpeechRecognition) {
+          const sessionToken = Date.now();
+          recognitionSessionTokenRef.current = sessionToken;
+
           const recognition = new SpeechRecognition();
           recognition.continuous = true;
           recognition.interimResults = true;
@@ -366,7 +429,25 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
           };
 
           recognition.onend = () => {
-            // Recognition ended, but we'll keep the transcription visible
+            // Some browsers auto-stop recognition after a while even with `continuous=true`.
+            // If voice mode is still ON and we are still recording, restart recognition.
+            try {
+              if (!voiceModeOnRef.current) return;
+              if (recognitionSessionTokenRef.current !== sessionToken) return;
+              if (rec.state === "inactive") return;
+              setTimeout(() => {
+                try {
+                  if (!voiceModeOnRef.current) return;
+                  if (recognitionSessionTokenRef.current !== sessionToken) return;
+                  if (rec.state === "inactive") return;
+                  recognition.start();
+                } catch {
+                  // ignore
+                }
+              }, 250);
+            } catch {
+              // ignore
+            }
           };
 
           recognition.start();
@@ -379,13 +460,15 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         // Continue with audio recording even if speech recognition fails
       }
 
-      stopTimerRef.current = setTimeout(() => {
-        try {
-          if (rec.state !== "inactive") rec.stop();
-        } catch {
-          // ignore
-        }
-      }, VOICE_CHAT_MAX_MS);
+      if (!voiceModeOnRef.current && VOICE_CHAT_MAX_MS > 0) {
+        stopTimerRef.current = setTimeout(() => {
+          try {
+            if (rec.state !== "inactive") rec.stop();
+          } catch {
+            // ignore
+          }
+        }, VOICE_CHAT_MAX_MS);
+      }
     } catch (e) {
       toast.error(e?.message || "Microphone access denied");
       setShowTranscription(false);
@@ -960,9 +1043,53 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                 {showTranscription && liveTranscription && (
                   <div className="bg-base-300 rounded-lg p-3 border border-base-content/10 animate-fade-in">
                     <p className="text-xs opacity-50 mb-1">You said:</p>
-                    <div className="text-sm opacity-80 line-clamp-3 overflow-hidden">
+                    <div className="text-sm opacity-80 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
                       {liveTranscription}
                     </div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${translateEnabled ? "btn-error" : "btn-outline"}`}
+                        onClick={() => setTranslateEnabled((v) => !v)}
+                      >
+                        Translate
+                      </button>
+
+                      <div className="dropdown">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline"
+                          disabled={!translateEnabled}
+                        >
+                          {translateTargetLanguage}
+                        </button>
+                        <ul
+                          tabIndex={0}
+                          className="dropdown-content menu bg-base-100 rounded-box z-[1] w-52 p-2 shadow"
+                        >
+                          {TRANSLATE_LANGUAGE_OPTIONS.map((lang) => (
+                            <li key={`tr-${lang}`}>
+                              <button
+                                type="button"
+                                onClick={() => setTranslateTargetLanguage(lang)}
+                              >
+                                {lang}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+
+                    {translateEnabled ? (
+                      <div className="mt-2">
+                        <p className="text-xs opacity-50 mb-1">{translateTargetLanguage}:</p>
+                        <div className="text-sm opacity-90 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
+                          {isTranslating ? "Translating..." : translatedText}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 )}
 

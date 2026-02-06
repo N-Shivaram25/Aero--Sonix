@@ -14,6 +14,7 @@ import {
   renameVoice,
   sendMessage,
   stt,
+  translate,
   tts,
   uploadVoice,
 } from "../controllers/aiRobot.controller.js";
@@ -30,6 +31,7 @@ router.put("/voices/:voiceId", renameVoice);
 router.get("/history", getHistory);
 router.post("/message", sendMessage);
 router.post("/stt", upload.single("audio"), stt);
+router.post("/translate", translate);
 router.post("/tts", tts);
 
 router.get("/conversations", listConversations);
