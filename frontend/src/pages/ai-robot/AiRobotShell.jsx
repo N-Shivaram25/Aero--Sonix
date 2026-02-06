@@ -44,6 +44,23 @@ const TRANSLATE_LANGUAGE_OPTIONS = [
   "Malayalam",
 ];
 
+const toSpeechRecognitionLang = (value) => {
+  const v = String(value || "").trim().toLowerCase();
+  if (!v || v === "auto") return "en-US";
+  const map = {
+    english: "en-US",
+    telugu: "te-IN",
+    hindi: "hi-IN",
+    spanish: "es-ES",
+    french: "fr-FR",
+    german: "de-DE",
+    tamil: "ta-IN",
+    kannada: "kn-IN",
+    malayalam: "ml-IN",
+  };
+  return map[v] || "en-US";
+};
+
 const getSupportedMimeType = () => {
   for (const t of mimePreference) {
     try {
@@ -116,6 +133,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [voiceStartModalOpen, setVoiceStartModalOpen] = useState(false);
   const [voiceStartWantsTranslate, setVoiceStartWantsTranslate] = useState(false);
 
+  const liveTranscriptFinalRef = useRef("");
+
   // Web Speech API for real-time transcription display
   const recognitionRef = useRef(null);
   const recognitionSessionTokenRef = useRef(0);
@@ -175,6 +194,82 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   useEffect(() => {
     voiceModeOnRef.current = voiceModeOn;
   }, [voiceModeOn]);
+
+  useEffect(() => {
+    try {
+      if (!voiceModeOnRef.current) return;
+      if (!isRecording) return;
+      const rec = recorder;
+      if (!rec || rec.state === "inactive") return;
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) return;
+
+      // Restart recognition so the new language takes effect.
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {
+          // ignore
+        }
+        recognitionRef.current = null;
+      }
+
+      const sessionToken = Date.now();
+      recognitionSessionTokenRef.current = sessionToken;
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = toSpeechRecognitionLang(translateSourceLanguage);
+
+      recognition.onstart = () => {
+        setShowTranscription(true);
+      };
+
+      recognition.onresult = (event) => {
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          const result = event.results[i];
+          const t = result?.[0]?.transcript || "";
+          if (result?.isFinal) {
+            liveTranscriptFinalRef.current = `${liveTranscriptFinalRef.current} ${t}`.trim();
+          } else {
+            interim += t;
+          }
+        }
+        const combined = `${liveTranscriptFinalRef.current} ${interim}`.trim();
+        setLiveTranscription(combined);
+      };
+
+      recognition.onerror = (event) => {
+        console.error("Speech recognition error:", event.error);
+      };
+
+      recognition.onend = () => {
+        try {
+          if (!voiceModeOnRef.current) return;
+          if (recognitionSessionTokenRef.current !== sessionToken) return;
+          if (rec.state === "inactive") return;
+          setTimeout(() => {
+            try {
+              if (!voiceModeOnRef.current) return;
+              if (recognitionSessionTokenRef.current !== sessionToken) return;
+              if (rec.state === "inactive") return;
+              recognition.start();
+            } catch {
+              // ignore
+            }
+          }, 250);
+        } catch {
+          // ignore
+        }
+      };
+
+      recognition.start();
+      recognitionRef.current = recognition;
+    } catch {
+      // ignore
+    }
+  }, [translateSourceLanguage, isRecording, recorder]);
 
   useEffect(() => {
     if (!showTranscription) {
@@ -411,23 +506,27 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
           const recognition = new SpeechRecognition();
           recognition.continuous = true;
           recognition.interimResults = true;
-          recognition.lang = 'en-US';
+          recognition.lang = toSpeechRecognitionLang(translateSourceLanguage);
 
           recognition.onstart = () => {
             setShowTranscription(true);
-            setLiveTranscription("");
+            // Do not clear transcript here; browsers can auto-restart recognition.
+            // Clearing would look like the text is getting stuck / restarting.
           };
 
           recognition.onresult = (event) => {
-            let fullTranscript = '';
-
-            // Collect all results from the beginning
-            for (let i = 0; i < event.results.length; i++) {
-              fullTranscript += event.results[i][0].transcript;
+            let interim = "";
+            for (let i = event.resultIndex; i < event.results.length; i += 1) {
+              const result = event.results[i];
+              const t = result?.[0]?.transcript || "";
+              if (result?.isFinal) {
+                liveTranscriptFinalRef.current = `${liveTranscriptFinalRef.current} ${t}`.trim();
+              } else {
+                interim += t;
+              }
             }
-
-            // Update with the complete transcript (no duplicates)
-            setLiveTranscription(fullTranscript.trim());
+            const combined = `${liveTranscriptFinalRef.current} ${interim}`.trim();
+            setLiveTranscription(combined);
           };
 
           recognition.onerror = (event) => {
@@ -751,6 +850,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       stopSpeaking();
       setShowTranscription(false);
       setLiveTranscription("");
+      liveTranscriptFinalRef.current = "";
       setTranslateEnabled(false);
       setTranslatedText("");
       return;
@@ -770,6 +870,9 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       setVoiceStartModalOpen(false);
       setTranslateEnabled(voiceStartWantsTranslate);
       setTranslatedText("");
+      setShowTranscription(true);
+      setLiveTranscription("");
+      liveTranscriptFinalRef.current = "";
       setVoiceModeOn(true);
       voiceModeOnRef.current = true;
       voiceModeTokenRef.current += 1;
