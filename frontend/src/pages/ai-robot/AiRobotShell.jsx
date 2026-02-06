@@ -127,6 +127,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [translateSourceLanguage, setTranslateSourceLanguage] = useState("Auto");
   const [translateTargetLanguage, setTranslateTargetLanguage] = useState("Telugu");
   const [translateVoiceGender, setTranslateVoiceGender] = useState("Male");
+  const [latestUtterance, setLatestUtterance] = useState("");
   const [translatedText, setTranslatedText] = useState("");
   const [isTranslating, setIsTranslating] = useState(false);
   const translateReqTokenRef = useRef(0);
@@ -135,6 +136,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const translateAudioRef = useRef(null);
   const translateSpeakTokenRef = useRef(0);
   const lastSpokenTranslationRef = useRef("");
+  const [translationCountdown, setTranslationCountdown] = useState(0);
+  const countdownIntervalRef = useRef(null);
 
   const [voiceStartModalOpen, setVoiceStartModalOpen] = useState(false);
   const [voiceStartWantsTranslate, setVoiceStartWantsTranslate] = useState(false);
@@ -238,6 +241,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
           const t = result?.[0]?.transcript || "";
           if (result?.isFinal) {
             liveTranscriptFinalRef.current = `${liveTranscriptFinalRef.current} ${t}`.trim();
+            const utter = String(t || "").trim();
+            if (utter) setLatestUtterance(utter);
           } else {
             interim += t;
           }
@@ -289,8 +294,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       return;
     }
 
-    const englishText = String(liveTranscription || "").trim();
-    if (!englishText) {
+    const text = String(latestUtterance || "").trim();
+    if (!text) {
       setTranslatedText("");
       setIsTranslating(false);
       return;
@@ -301,12 +306,14 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       try {
         setIsTranslating(true);
         const res = await aiRobotTranslate({
-          text: englishText,
+          text,
           targetLanguage: translateTargetLanguage,
           sourceLanguage: translateSourceLanguage,
         });
         if (translateReqTokenRef.current !== token) return;
-        setTranslatedText(String(res?.translatedText || ""));
+        const next = String(res?.translatedText || "");
+        setTranslatedText(next);
+        lastSpokenTranslationRef.current = "";
       } catch {
         if (translateReqTokenRef.current !== token) return;
         setTranslatedText("");
@@ -314,10 +321,10 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         if (translateReqTokenRef.current !== token) return;
         setIsTranslating(false);
       }
-    }, 450);
+    }, 150);
 
     return () => clearTimeout(id);
-  }, [liveTranscription, translateTargetLanguage, translateSourceLanguage, translateEnabled, showTranscription]);
+  }, [latestUtterance, translateTargetLanguage, translateSourceLanguage, translateEnabled, showTranscription]);
 
   useEffect(() => {
     if (!translateEnabled) return;
@@ -331,12 +338,42 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     const id = setTimeout(async () => {
       try {
         if (translateSpeakTokenRef.current !== token) return;
+
+        try {
+          if (countdownIntervalRef.current) {
+            clearInterval(countdownIntervalRef.current);
+            countdownIntervalRef.current = null;
+          }
+        } catch {
+          // ignore
+        }
+
+        // Countdown is purely indicative; it does not add artificial delay.
+        setTranslationCountdown(3);
+        countdownIntervalRef.current = setInterval(() => {
+          setTranslationCountdown((v) => {
+            if (v <= 1) return 1;
+            return v - 1;
+          });
+        }, 1000);
+
         const buf = await aiRobotTts({
           text,
           voiceGender: translateVoiceGender,
         });
         if (translateSpeakTokenRef.current !== token) return;
         if (!buf) return;
+
+        try {
+          if (countdownIntervalRef.current) {
+            clearInterval(countdownIntervalRef.current);
+            countdownIntervalRef.current = null;
+          }
+        } catch {
+          // ignore
+        }
+        setTranslationCountdown(-1);
+        setTimeout(() => setTranslationCountdown(0), 500);
 
         const blob = new Blob([buf], { type: "audio/mpeg" });
         const url = URL.createObjectURL(blob);
@@ -368,11 +405,33 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         lastSpokenTranslationRef.current = text;
       } catch {
         // ignore
+      } finally {
+        try {
+          if (countdownIntervalRef.current) {
+            clearInterval(countdownIntervalRef.current);
+            countdownIntervalRef.current = null;
+          }
+        } catch {
+          // ignore
+        }
       }
     }, 800);
 
     return () => clearTimeout(id);
   }, [translatedText, translateEnabled, showTranscription, isTranslating, translateVoiceGender]);
+
+  useEffect(() => {
+    return () => {
+      try {
+        if (countdownIntervalRef.current) {
+          clearInterval(countdownIntervalRef.current);
+          countdownIntervalRef.current = null;
+        }
+      } catch {
+        // ignore
+      }
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -582,6 +641,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
               const t = result?.[0]?.transcript || "";
               if (result?.isFinal) {
                 liveTranscriptFinalRef.current = `${liveTranscriptFinalRef.current} ${t}`.trim();
+                const utter = String(t || "").trim();
+                if (utter) setLatestUtterance(utter);
               } else {
                 interim += t;
               }
@@ -912,8 +973,10 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       setShowTranscription(false);
       setLiveTranscription("");
       liveTranscriptFinalRef.current = "";
+      setLatestUtterance("");
       setTranslateEnabled(false);
       setTranslatedText("");
+      setTranslationCountdown(0);
       return;
     }
 
@@ -934,6 +997,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       setShowTranscription(true);
       setLiveTranscription("");
       liveTranscriptFinalRef.current = "";
+      setLatestUtterance("");
       setVoiceModeOn(true);
       voiceModeOnRef.current = true;
       voiceModeTokenRef.current += 1;
@@ -1306,6 +1370,11 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                         <p className="text-xs opacity-50 mb-1">
                           {translateSourceLanguage} → {translateTargetLanguage}:
                         </p>
+                        {translationCountdown ? (
+                          <div className="text-xs font-semibold opacity-70 mb-1">
+                            {translationCountdown === -1 ? "Go" : `Speaking in ${translationCountdown}...`}
+                          </div>
+                        ) : null}
                         <div className="text-sm opacity-90 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
                           {isTranslating ? "Translating..." : translatedText}
                         </div>
