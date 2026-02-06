@@ -452,24 +452,56 @@ export async function translate(req, res) {
     const cleanedText = String(text).trim();
     if (!cleanedText) return res.status(200).json({ success: true, translatedText: "" });
 
-    const openai = getOpenAIClient();
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      temperature: 0,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a translation engine. Translate the user's text exactly and naturally. Return only the translated text with no extra words.",
-        },
-        {
-          role: "user",
-          content: `Translate to ${targetLanguage}. Text: ${cleanedText}`,
-        },
-      ],
+    const apiKey = process.env.GOOGLE_CLOUD_API_KEY;
+    if (!apiKey) return res.status(500).json({ message: "GOOGLE_CLOUD_API_KEY is not set" });
+
+    const toGoogleLanguageCode = (value) => {
+      const v = String(value || "").trim();
+      if (!v) return "";
+      const key = v.toLowerCase();
+      const map = {
+        telugu: "te",
+        hindi: "hi",
+        spanish: "es",
+        french: "fr",
+        german: "de",
+        tamil: "ta",
+        kannada: "kn",
+        malayalam: "ml",
+        english: "en",
+      };
+      if (map[key]) return map[key];
+      if (/^[a-z]{2}(-[a-z]{2})?$/i.test(v)) return v;
+      return "";
+    };
+
+    const target = toGoogleLanguageCode(targetLanguage);
+    if (!target) {
+      return res.status(400).json({ message: "Unsupported targetLanguage" });
+    }
+
+    const url = `https://translation.googleapis.com/language/translate/v2?key=${encodeURIComponent(apiKey)}`;
+    const googleRes = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        q: cleanedText,
+        target,
+        format: "text",
+      }),
     });
 
-    const translatedText = completion?.choices?.[0]?.message?.content?.trim() || "";
+    const json = await googleRes.json().catch(() => null);
+    if (!googleRes.ok) {
+      return res.status(googleRes.status).json({
+        message: "Translation failed",
+        details: json,
+      });
+    }
+
+    const translatedText = String(json?.data?.translations?.[0]?.translatedText || "");
     return res.status(200).json({ success: true, translatedText });
   } catch (error) {
     console.error("Error in aiRobot translate controller", error);
