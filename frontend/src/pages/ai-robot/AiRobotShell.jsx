@@ -127,7 +127,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [translateSourceLanguage, setTranslateSourceLanguage] = useState("Auto");
   const [translateTargetLanguage, setTranslateTargetLanguage] = useState("Telugu");
   const [translateVoiceGender, setTranslateVoiceGender] = useState("Male");
-  const [latestUtterance, setLatestUtterance] = useState("");
+  const [latestHeardText, setLatestHeardText] = useState("");
   const [translatedText, setTranslatedText] = useState("");
   const [isTranslating, setIsTranslating] = useState(false);
   const translateReqTokenRef = useRef(0);
@@ -136,6 +136,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const translateAudioRef = useRef(null);
   const translateSpeakTokenRef = useRef(0);
   const lastSpokenTranslationRef = useRef("");
+  const lastTranslatedSourceRef = useRef("");
   const [translationCountdown, setTranslationCountdown] = useState(0);
   const countdownIntervalRef = useRef(null);
 
@@ -241,14 +242,17 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
           const t = result?.[0]?.transcript || "";
           if (result?.isFinal) {
             liveTranscriptFinalRef.current = `${liveTranscriptFinalRef.current} ${t}`.trim();
-            const utter = String(t || "").trim();
-            if (utter) setLatestUtterance(utter);
+            const chunk = String(t || "").trim();
+            if (chunk) setLatestHeardText(chunk);
           } else {
             interim += t;
           }
         }
         const combined = `${liveTranscriptFinalRef.current} ${interim}`.trim();
         setLiveTranscription(combined);
+
+        const heard = String(interim || "").trim();
+        if (heard) setLatestHeardText(heard);
       };
 
       recognition.onerror = (event) => {
@@ -294,12 +298,14 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       return;
     }
 
-    const text = String(latestUtterance || "").trim();
+    const text = String(latestHeardText || "").trim();
     if (!text) {
       setTranslatedText("");
       setIsTranslating(false);
       return;
     }
+
+    if (text === lastTranslatedSourceRef.current) return;
 
     const token = ++translateReqTokenRef.current;
     const id = setTimeout(async () => {
@@ -314,6 +320,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         const next = String(res?.translatedText || "");
         setTranslatedText(next);
         lastSpokenTranslationRef.current = "";
+        lastTranslatedSourceRef.current = text;
       } catch {
         if (translateReqTokenRef.current !== token) return;
         setTranslatedText("");
@@ -321,10 +328,10 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         if (translateReqTokenRef.current !== token) return;
         setIsTranslating(false);
       }
-    }, 150);
+    }, 250);
 
     return () => clearTimeout(id);
-  }, [latestUtterance, translateTargetLanguage, translateSourceLanguage, translateEnabled, showTranscription]);
+  }, [latestHeardText, translateTargetLanguage, translateSourceLanguage, translateEnabled, showTranscription]);
 
   useEffect(() => {
     if (!translateEnabled) return;
@@ -338,6 +345,17 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     const id = setTimeout(async () => {
       try {
         if (translateSpeakTokenRef.current !== token) return;
+
+        // Cancel any current playback so the newest chunk wins.
+        try {
+          const el = translateAudioRef.current;
+          if (el) {
+            el.pause();
+            el.currentTime = 0;
+          }
+        } catch {
+          // ignore
+        }
 
         try {
           if (countdownIntervalRef.current) {
@@ -641,14 +659,17 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
               const t = result?.[0]?.transcript || "";
               if (result?.isFinal) {
                 liveTranscriptFinalRef.current = `${liveTranscriptFinalRef.current} ${t}`.trim();
-                const utter = String(t || "").trim();
-                if (utter) setLatestUtterance(utter);
+                const chunk = String(t || "").trim();
+                if (chunk) setLatestHeardText(chunk);
               } else {
                 interim += t;
               }
             }
             const combined = `${liveTranscriptFinalRef.current} ${interim}`.trim();
             setLiveTranscription(combined);
+
+            const heard = String(interim || "").trim();
+            if (heard) setLatestHeardText(heard);
           };
 
           recognition.onerror = (event) => {
@@ -973,9 +994,10 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       setShowTranscription(false);
       setLiveTranscription("");
       liveTranscriptFinalRef.current = "";
-      setLatestUtterance("");
+      setLatestHeardText("");
       setTranslateEnabled(false);
       setTranslatedText("");
+      lastTranslatedSourceRef.current = "";
       setTranslationCountdown(0);
       return;
     }
@@ -997,7 +1019,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       setShowTranscription(true);
       setLiveTranscription("");
       liveTranscriptFinalRef.current = "";
-      setLatestUtterance("");
+      setLatestHeardText("");
+      lastTranslatedSourceRef.current = "";
       setVoiceModeOn(true);
       voiceModeOnRef.current = true;
       voiceModeTokenRef.current += 1;
