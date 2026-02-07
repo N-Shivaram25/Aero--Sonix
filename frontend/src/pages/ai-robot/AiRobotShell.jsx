@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 import toast from "react-hot-toast";
-import { Mic, MicOff } from "lucide-react";
+import { Mic, MicOff, RotateCcw } from "lucide-react";
 import { LANGUAGES } from "../../constants";
 import {
   aiRobotSendConversationMessage,
@@ -127,6 +127,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [translateSourceLanguage, setTranslateSourceLanguage] = useState("Auto");
   const [translateTargetLanguage, setTranslateTargetLanguage] = useState("Telugu");
   const [translateVoiceGender, setTranslateVoiceGender] = useState("Male");
+  const [useWhisperForLive, setUseWhisperForLive] = useState(true);
   const [isTranslating, setIsTranslating] = useState(false);
   const translateReqTokenRef = useRef(0);
 
@@ -144,6 +145,11 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const lastSpokenTranslationRef = useRef("");
   const isTranslateSpeakingRef = useRef(false);
   const suppressListeningRef = useRef(false);
+
+  const whisperLiveChunksRef = useRef([]);
+  const whisperLiveTimerRef = useRef(null);
+  const whisperLiveInFlightRef = useRef(false);
+  const whisperLiveTokenRef = useRef(0);
 
   const [voiceStartModalOpen, setVoiceStartModalOpen] = useState(false);
   const [voiceStartWantsTranslate, setVoiceStartWantsTranslate] = useState(false);
@@ -214,6 +220,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     try {
       if (!voiceModeOnRef.current) return;
       if (!isRecording) return;
+      if (translateEnabled && useWhisperForLive) return;
       const rec = recorder;
       if (!rec || rec.state === "inactive") return;
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -285,7 +292,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     } catch {
       // ignore
     }
-  }, [translateSourceLanguage, isRecording, recorder]);
+  }, [translateSourceLanguage, isRecording, recorder, translateEnabled, useWhisperForLive]);
 
   const commonPrefixIndex = (a, b) => {
     const s1 = String(a || "");
@@ -294,6 +301,18 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     let i = 0;
     while (i < max && s1[i] === s2[i]) i += 1;
     return i;
+  };
+
+  const resetLiveTexts = () => {
+    setLiveTranscription("");
+    liveTranscriptFinalRef.current = "";
+    setInputBaseText("");
+    setInputNewText("");
+    setTranslatedBaseText("");
+    setTranslatedNewText("");
+    translatedFullRef.current = "";
+    lastTranslatedForInputRef.current = "";
+    lastSpokenTranslationRef.current = "";
   };
 
   useEffect(() => {
@@ -658,6 +677,11 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         return;
       }
 
+      // New recording session => reset whisper live buffers
+      whisperLiveChunksRef.current = [];
+      whisperLiveInFlightRef.current = false;
+      whisperLiveTokenRef.current += 1;
+
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
@@ -674,11 +698,32 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       const chunks = [];
       rec.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) chunks.push(e.data);
+
+        // High-accuracy live STT using Whisper: keep appending recognized text while recording.
+        // This provides better accuracy than browser SpeechRecognition for many languages.
+        try {
+          if (!translateEnabled) return;
+          if (!useWhisperForLive) return;
+          if (suppressListeningRef.current) return;
+          if (!e.data || e.data.size === 0) return;
+          whisperLiveChunksRef.current.push(e.data);
+        } catch {
+          // ignore
+        }
       };
 
       rec.onstop = async () => {
         try {
           stream.getTracks().forEach((t) => t.stop());
+        } catch {
+          // ignore
+        }
+
+        try {
+          if (whisperLiveTimerRef.current) {
+            clearInterval(whisperLiveTimerRef.current);
+            whisperLiveTimerRef.current = null;
+          }
         } catch {
           // ignore
         }
@@ -717,14 +762,15 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         await processVoiceChat(blob);
       };
 
-      rec.start();
+      // Timeslice gives us a continuous stream of chunks for Whisper live STT
+      rec.start(900);
       setRecorder(rec);
       setIsRecording(true);
 
       // Start Web Speech API for real-time transcription display
       try {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (SpeechRecognition) {
+        if (SpeechRecognition && !(translateEnabled && useWhisperForLive)) {
           const sessionToken = Date.now();
           recognitionSessionTokenRef.current = sessionToken;
 
@@ -785,11 +831,48 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
           recognition.start();
           recognitionRef.current = recognition;
         } else {
-          console.warn('Web Speech API not supported, transcription will show after recording');
+          if (!SpeechRecognition) {
+            console.warn('Web Speech API not supported, transcription will show after recording');
+          }
         }
       } catch (e) {
         console.error('Failed to start speech recognition:', e);
         // Continue with audio recording even if speech recognition fails
+      }
+
+      // Whisper live STT pump
+      try {
+        if (translateEnabled && useWhisperForLive) {
+          const token = whisperLiveTokenRef.current;
+          if (whisperLiveTimerRef.current) clearInterval(whisperLiveTimerRef.current);
+          whisperLiveTimerRef.current = setInterval(async () => {
+            try {
+              if (whisperLiveTokenRef.current !== token) return;
+              if (!voiceModeOnRef.current) return;
+              if (suppressListeningRef.current) return;
+              if (whisperLiveInFlightRef.current) return;
+              if (!whisperLiveChunksRef.current.length) return;
+
+              const slice = whisperLiveChunksRef.current.splice(0);
+              const blob = new Blob(slice, { type: mimeType || "audio/webm" });
+              if (!blob || blob.size < 1500) return;
+
+              whisperLiveInFlightRef.current = true;
+              const res = await aiRobotStt({ audioBlob: blob });
+              const text = String(res?.text || "").trim();
+              if (text) {
+                liveTranscriptFinalRef.current = `${liveTranscriptFinalRef.current} ${text}`.trim();
+                setLiveTranscription(liveTranscriptFinalRef.current);
+              }
+            } catch {
+              // ignore
+            } finally {
+              whisperLiveInFlightRef.current = false;
+            }
+          }, 1500);
+        }
+      } catch {
+        // ignore
       }
 
       if (!voiceModeOnRef.current && VOICE_CHAT_MAX_MS > 0) {
@@ -821,6 +904,15 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         if (recognitionRef.current) {
           recognitionRef.current.stop();
           recognitionRef.current = null;
+        }
+      } catch {
+        // ignore
+      }
+
+      try {
+        if (whisperLiveTimerRef.current) {
+          clearInterval(whisperLiveTimerRef.current);
+          whisperLiveTimerRef.current = null;
         }
       } catch {
         // ignore
@@ -887,7 +979,9 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       console.log("📝 Transcribed text:", text);
 
       // Display transcription in the horizontal bar
-      setLiveTranscription(text);
+      if (!(translateEnabled && useWhisperForLive)) {
+        setLiveTranscription(text);
+      }
 
       if (!text) {
         console.error("❌ No text transcribed from audio");
@@ -1407,12 +1501,21 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                 {showTranscription && liveTranscription && (
                   <div className="bg-base-300 rounded-lg p-3 border border-base-content/10 animate-fade-in">
                     <p className="text-xs opacity-50 mb-1">You said:</p>
-                    <div className="text-sm opacity-80 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
+                    <div className="text-sm opacity-80 whitespace-pre-wrap break-words">
                       <span>{inputBaseText}</span>
                       {inputNewText ? <span className="text-green-300">{inputBaseText ? ` ${inputNewText}` : inputNewText}</span> : null}
                     </div>
 
                     <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost"
+                        onClick={resetLiveTexts}
+                        title="Reset"
+                      >
+                        <RotateCcw className="size-4" />
+                      </button>
+
                       <button
                         type="button"
                         className={`btn btn-sm ${translateEnabled ? "btn-error" : "btn-outline"}`}
@@ -1490,7 +1593,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                         <p className="text-xs opacity-50 mb-1">
                           {translateSourceLanguage} → {translateTargetLanguage}:
                         </p>
-                        <div className="text-sm opacity-90 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
+                        <div className="text-sm opacity-90 whitespace-pre-wrap break-words">
                           <span>{translatedBaseText}</span>
                           {translatedNewText ? (
                             <span className="text-green-300">{translatedBaseText ? ` ${translatedNewText}` : translatedNewText}</span>
