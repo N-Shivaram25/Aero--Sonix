@@ -148,7 +148,9 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [translateSettingsModalOpen, setTranslateSettingsModalOpen] = useState(false);
 
   const translateAudioRef = useRef(null);
+  const parallelTranslateAudioRef = useRef(null);
   const translateSpeakTokenRef = useRef(0);
+  const parallelTranslateSpeakTokenRef = useRef(0);
   const lastSpokenTranslationRef = useRef("");
   const isTranslateSpeakingRef = useRef(false);
   const suppressListeningRef = useRef(false);
@@ -409,19 +411,19 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     if (!toSpeak) return;
     if (parallelIsSpeakingRef.current) return;
 
-    const token = ++translateSpeakTokenRef.current;
+    const token = ++parallelTranslateSpeakTokenRef.current;
     parallelIsSpeakingRef.current = true;
     try {
       const buf = await aiRobotTts({
         text: toSpeak,
         voiceGender: translateVoiceGender,
       });
-      if (translateSpeakTokenRef.current !== token) return;
+      if (parallelTranslateSpeakTokenRef.current !== token) return;
       if (!buf) return;
 
       const blob = new Blob([buf], { type: "audio/mpeg" });
       const url = URL.createObjectURL(blob);
-      const el = translateAudioRef.current;
+      const el = parallelTranslateAudioRef.current;
       if (!el) return;
 
       parallelPendingSpeakRef.current = "";
@@ -450,6 +452,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       if (p && typeof p.catch === "function") {
         p.catch(() => {
           parallelIsSpeakingRef.current = false;
+          // Restore to queue so we can retry if the user interacts (autoplay policies)
+          parallelPendingSpeakRef.current = `${toSpeak} ${String(parallelPendingSpeakRef.current || "").trim()}`.trim();
           try {
             URL.revokeObjectURL(url);
           } catch {
@@ -610,10 +614,20 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       const p = el.play();
       if (p && typeof p.catch === "function") {
         p.catch(() => {
+          isTranslateSpeakingRef.current = false;
           try {
             URL.revokeObjectURL(url);
           } catch {
             // ignore
+          }
+
+          if (mode !== "parallel") {
+            suppressListeningRef.current = false;
+            try {
+              if (recorder && recorder.state === "paused") recorder.resume();
+            } catch {
+              // ignore
+            }
           }
         });
       }
@@ -958,6 +972,17 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         }
       };
 
+      rec.onerror = () => {
+        try {
+          stream.getTracks().forEach((t) => t.stop());
+        } catch {
+          // ignore
+        }
+        setIsRecording(false);
+        setRecorder(null);
+        toast.error("Recording error. Please turn Voice ON again.");
+      };
+
       rec.onstop = async () => {
         try {
           stream.getTracks().forEach((t) => t.stop());
@@ -1009,7 +1034,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       };
 
       // Timeslice gives us a continuous stream of chunks for Whisper live STT
-      rec.start(900);
+      rec.start(700);
       setRecorder(rec);
       setIsRecording(true);
 
@@ -1101,7 +1126,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
 
               const slice = whisperLiveChunksRef.current.splice(0);
               const blob = new Blob(slice, { type: mimeType || "audio/webm" });
-              if (!blob || blob.size < 1500) return;
+              if (!blob || blob.size < 900) return;
 
               whisperLiveInFlightRef.current = true;
               const res = await aiRobotStt({ audioBlob: blob });
@@ -1115,7 +1140,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
             } finally {
               whisperLiveInFlightRef.current = false;
             }
-          }, 1500);
+          }, 900);
         }
       } catch {
         // ignore
@@ -1929,6 +1954,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
 
                 <audio ref={audioRef} />
                 <audio ref={translateAudioRef} />
+                <audio ref={parallelTranslateAudioRef} />
               </div>
             </div>
           </div>
