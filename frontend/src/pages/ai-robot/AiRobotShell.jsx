@@ -703,7 +703,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         if (translateReqTokenRef.current !== token) return;
         setIsTranslating(false);
       }
-    }, 450);
+    }, 200);
 
     return () => clearTimeout(id);
   }, [liveTranscription, translateTargetLanguage, translateSourceLanguage, translateEnabled, showTranscription]);
@@ -724,7 +724,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         if (parallelSpeakTimerRef.current) clearTimeout(parallelSpeakTimerRef.current);
         parallelSpeakTimerRef.current = setTimeout(() => {
           speakTranslatedTextParallelQueued();
-        }, 180);
+        }, 80);
       } catch {
         // ignore
       }
@@ -968,7 +968,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       };
 
       // Timeslice gives us a continuous stream of chunks for Whisper live STT
-      rec.start(900);
+      // Lower timeslice => lower latency for Parallel mode
+      rec.start(400);
       setRecorder(rec);
       setIsRecording(true);
 
@@ -1060,7 +1061,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
 
               const slice = whisperLiveChunksRef.current.splice(0);
               const blob = new Blob(slice, { type: mimeType || "audio/webm" });
-              if (!blob || blob.size < 1500) return;
+              if (!blob || blob.size < 900) return;
 
               whisperLiveInFlightRef.current = true;
               const res = await aiRobotStt({ audioBlob: blob });
@@ -1074,7 +1075,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
             } finally {
               whisperLiveInFlightRef.current = false;
             }
-          }, 1500);
+          }, 800);
         }
       } catch {
         // ignore
