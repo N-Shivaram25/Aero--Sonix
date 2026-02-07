@@ -137,6 +137,9 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [translatedBaseText, setTranslatedBaseText] = useState("");
   const [translatedNewText, setTranslatedNewText] = useState("");
 
+  const [inputLines, setInputLines] = useState([]);
+  const [translatedLines, setTranslatedLines] = useState([]);
+
   const translatedFullRef = useRef("");
   const lastTranslatedForInputRef = useRef("");
   const [translateSettingsModalOpen, setTranslateSettingsModalOpen] = useState(false);
@@ -151,6 +154,10 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const sentenceBoundaryTimerRef = useRef(null);
   const pauseSpeakTimerRef = useRef(null);
   const pendingSpeakTextRef = useRef("");
+
+  const parallelPendingSpeakRef = useRef("");
+  const parallelSpeakTimerRef = useRef(null);
+  const parallelIsSpeakingRef = useRef(false);
 
   const whisperLiveChunksRef = useRef([]);
   const whisperLiveTimerRef = useRef(null);
@@ -309,6 +316,16 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     return i;
   };
 
+  const pushRollingLine = (setter, line) => {
+    const cleaned = String(line || "").trim();
+    if (!cleaned) return;
+    setter((prev) => {
+      const next = Array.isArray(prev) ? [...prev, cleaned] : [cleaned];
+      if (next.length <= 4) return next;
+      return [cleaned];
+    });
+  };
+
   const resetLiveTexts = () => {
     setLiveTranscription("");
     liveTranscriptFinalRef.current = "";
@@ -316,11 +333,14 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     setInputNewText("");
     setTranslatedBaseText("");
     setTranslatedNewText("");
+    setInputLines([]);
+    setTranslatedLines([]);
     translatedFullRef.current = "";
     lastTranslatedForInputRef.current = "";
     lastSpokenTranslationRef.current = "";
     pendingSpeakTextRef.current = "";
     lastInputActivityAtRef.current = 0;
+    parallelPendingSpeakRef.current = "";
     try {
       if (sentenceBoundaryTimerRef.current) {
         clearTimeout(sentenceBoundaryTimerRef.current);
@@ -330,6 +350,10 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         clearTimeout(pauseSpeakTimerRef.current);
         pauseSpeakTimerRef.current = null;
       }
+      if (parallelSpeakTimerRef.current) {
+        clearTimeout(parallelSpeakTimerRef.current);
+        parallelSpeakTimerRef.current = null;
+      }
     } catch {
       // ignore
     }
@@ -337,15 +361,88 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
 
   const finalizeCurrentHighlight = () => {
     const englishText = String(liveTranscription || "").trim();
+    const targetText = String(translatedFullRef.current || "").trim();
     if (!englishText) return;
 
-    // Move current highlight into base and clear highlight.
-    setInputBaseText(englishText);
-    setInputNewText("");
-    lastTranslatedForInputRef.current = englishText;
+    pushRollingLine(setInputLines, englishText);
+    if (translateEnabled && targetText) {
+      pushRollingLine(setTranslatedLines, targetText);
+    }
 
-    setTranslatedBaseText(String(translatedFullRef.current || "").trim());
+    // Reset sentence buffers (keep recording running)
+    setLiveTranscription("");
+    liveTranscriptFinalRef.current = "";
+    setInputBaseText("");
+    setInputNewText("");
+
+    setTranslatedBaseText("");
     setTranslatedNewText("");
+    translatedFullRef.current = "";
+    lastTranslatedForInputRef.current = "";
+    pendingSpeakTextRef.current = "";
+    lastSpokenTranslationRef.current = "";
+    parallelPendingSpeakRef.current = "";
+  };
+
+  const speakTranslatedTextParallelQueued = async () => {
+    const toSpeak = String(parallelPendingSpeakRef.current || "").trim();
+    if (!toSpeak) return;
+    if (parallelIsSpeakingRef.current) return;
+
+    const token = ++translateSpeakTokenRef.current;
+    parallelIsSpeakingRef.current = true;
+    try {
+      const buf = await aiRobotTts({
+        text: toSpeak,
+        voiceGender: translateVoiceGender,
+      });
+      if (translateSpeakTokenRef.current !== token) return;
+      if (!buf) return;
+
+      const blob = new Blob([buf], { type: "audio/mpeg" });
+      const url = URL.createObjectURL(blob);
+      const el = translateAudioRef.current;
+      if (!el) return;
+
+      parallelPendingSpeakRef.current = "";
+
+      try {
+        el.pause();
+        el.currentTime = 0;
+      } catch {
+        // ignore
+      }
+
+      el.src = url;
+      el.onended = () => {
+        parallelIsSpeakingRef.current = false;
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          // ignore
+        }
+        setTimeout(() => {
+          speakTranslatedTextParallelQueued();
+        }, 20);
+      };
+
+      const p = el.play();
+      if (p && typeof p.catch === "function") {
+        p.catch(() => {
+          parallelIsSpeakingRef.current = false;
+          try {
+            URL.revokeObjectURL(url);
+          } catch {
+            // ignore
+          }
+        });
+      }
+
+      lastSpokenTranslationRef.current = toSpeak;
+    } catch {
+      parallelIsSpeakingRef.current = false;
+      // ignore
+    }
   };
 
   const speakTranslatedText = async ({ text, mode }) => {
@@ -622,7 +719,15 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       const immediate = String(translatedNewText || "").trim();
       if (!immediate) return;
       if (immediate === lastSpokenTranslationRef.current) return;
-      speakTranslatedText({ text: immediate, mode: "parallel" });
+      parallelPendingSpeakRef.current = `${String(parallelPendingSpeakRef.current || "").trim()} ${immediate}`.trim();
+      try {
+        if (parallelSpeakTimerRef.current) clearTimeout(parallelSpeakTimerRef.current);
+        parallelSpeakTimerRef.current = setTimeout(() => {
+          speakTranslatedTextParallelQueued();
+        }, 180);
+      } catch {
+        // ignore
+      }
       return;
     }
 
@@ -1295,6 +1400,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     try {
       setVoiceStartModalOpen(false);
       setTranslateEnabled(voiceStartWantsTranslate);
+      setInputLines([]);
+      setTranslatedLines([]);
       setInputBaseText("");
       setInputNewText("");
       setTranslatedBaseText("");
@@ -1302,6 +1409,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       translatedFullRef.current = "";
       lastTranslatedForInputRef.current = "";
       lastSpokenTranslationRef.current = "";
+      pendingSpeakTextRef.current = "";
+      parallelPendingSpeakRef.current = "";
       setShowTranscription(true);
       setLiveTranscription("");
       liveTranscriptFinalRef.current = "";
@@ -1598,12 +1707,28 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                 </div>
 
                 {/* Live Transcription Bar */}
-                {showTranscription && liveTranscription && (
+                {showTranscription && (liveTranscription || inputLines.length || (translateEnabled && translatedLines.length)) ? (
                   <div className="bg-base-300 rounded-lg p-3 pr-24 border border-base-content/10 animate-fade-in">
                     <p className="text-xs opacity-50 mb-1">You said:</p>
                     <div className="text-sm opacity-80 whitespace-pre-wrap break-words">
-                      <span>{inputBaseText}</span>
-                      {inputNewText ? <span className="text-green-300">{inputBaseText ? ` ${inputNewText}` : inputNewText}</span> : null}
+                      {inputLines.length ? (
+                        <div className="space-y-1 mb-2">
+                          {inputLines.map((l, idx) => (
+                            <div key={`in-line-${idx}`} className="opacity-80">
+                              {l}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {liveTranscription ? (
+                        <div>
+                          <span>{inputBaseText}</span>
+                          {inputNewText ? (
+                            <span className="text-green-300">{inputBaseText ? ` ${inputNewText}` : inputNewText}</span>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -1627,6 +1752,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                             setInputNewText("");
                             setTranslatedBaseText("");
                             setTranslatedNewText("");
+                            setTranslatedLines([]);
                             translatedFullRef.current = "";
                             lastTranslatedForInputRef.current = "";
                             lastSpokenTranslationRef.current = "";
@@ -1719,6 +1845,16 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                           {translateSourceLanguage} → {translateTargetLanguage}:
                         </p>
                         <div className="text-sm opacity-90 whitespace-pre-wrap break-words">
+                          {translatedLines.length ? (
+                            <div className="space-y-1 mb-2">
+                              {translatedLines.map((l, idx) => (
+                                <div key={`tr-line-${idx}`} className="opacity-80">
+                                  {l}
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+
                           <span>{translatedBaseText}</span>
                           {translatedNewText ? (
                             <span className="text-green-300">{translatedBaseText ? ` ${translatedNewText}` : translatedNewText}</span>
@@ -1729,7 +1865,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                       </div>
                     ) : null}
                   </div>
-                )}
+                ) : null}
 
                 {/* Chat Messages Area */}
                 <div className="min-h-[45vh] max-h-[65vh] overflow-y-auto rounded-lg border border-base-300 bg-base-100 p-3 space-y-2">
