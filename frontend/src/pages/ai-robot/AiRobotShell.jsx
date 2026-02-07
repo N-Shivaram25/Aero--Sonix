@@ -155,6 +155,9 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const isTranslateSpeakingRef = useRef(false);
   const suppressListeningRef = useRef(false);
 
+  const parallelAudioCtxRef = useRef(null);
+  const parallelAudioUnlockedRef = useRef(false);
+
   const lastInputActivityAtRef = useRef(0);
   const lastPauseBucketRef = useRef("new");
   const sentenceBoundaryTimerRef = useRef(null);
@@ -214,6 +217,69 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       }
     } catch {
       // ignore
+    }
+  };
+
+  const ensureParallelAudioUnlocked = async () => {
+    try {
+      if (parallelAudioUnlockedRef.current) return true;
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return false;
+      if (!parallelAudioCtxRef.current) {
+        parallelAudioCtxRef.current = new Ctx();
+      }
+
+      const ctx = parallelAudioCtxRef.current;
+      if (ctx.state === "suspended") {
+        try {
+          await ctx.resume();
+        } catch {
+          // ignore
+        }
+      }
+
+      // Play a near-silent buffer once to "unlock" audio on iOS/Safari.
+      try {
+        const buf = ctx.createBuffer(1, 1, ctx.sampleRate);
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(ctx.destination);
+        src.start(0);
+      } catch {
+        // ignore
+      }
+
+      parallelAudioUnlockedRef.current = true;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const playParallelTtsArrayBuffer = async (arrayBuffer, { onEnded } = {}) => {
+    try {
+      const ok = await ensureParallelAudioUnlocked();
+      if (!ok) throw new Error("AudioContext not available");
+
+      const ctx = parallelAudioCtxRef.current;
+      if (!ctx) throw new Error("AudioContext missing");
+
+      // Decode mp3 and play through WebAudio (more reliable than <audio>.play() after async fetch).
+      const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0));
+      const src = ctx.createBufferSource();
+      src.buffer = decoded;
+      src.connect(ctx.destination);
+      src.onended = () => {
+        try {
+          onEnded?.();
+        } catch {
+          // ignore
+        }
+      };
+      src.start(0);
+      return true;
+    } catch {
+      return false;
     }
   };
 
@@ -421,45 +487,22 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       if (parallelTranslateSpeakTokenRef.current !== token) return;
       if (!buf) return;
 
-      const blob = new Blob([buf], { type: "audio/mpeg" });
-      const url = URL.createObjectURL(blob);
-      const el = parallelTranslateAudioRef.current;
-      if (!el) return;
-
       parallelPendingSpeakRef.current = "";
 
-      try {
-        el.pause();
-        el.currentTime = 0;
-      } catch {
-        // ignore
-      }
-
-      el.src = url;
-      el.onended = () => {
-        parallelIsSpeakingRef.current = false;
-        try {
-          URL.revokeObjectURL(url);
-        } catch {
-          // ignore
-        }
-        setTimeout(() => {
-          speakTranslatedTextParallelQueued();
-        }, 20);
-      };
-
-      const p = el.play();
-      if (p && typeof p.catch === "function") {
-        p.catch(() => {
+      const started = await playParallelTtsArrayBuffer(buf, {
+        onEnded: () => {
           parallelIsSpeakingRef.current = false;
-          // Restore to queue so we can retry if the user interacts (autoplay policies)
-          parallelPendingSpeakRef.current = `${toSpeak} ${String(parallelPendingSpeakRef.current || "").trim()}`.trim();
-          try {
-            URL.revokeObjectURL(url);
-          } catch {
-            // ignore
-          }
-        });
+          setTimeout(() => {
+            speakTranslatedTextParallelQueued();
+          }, 20);
+        },
+      });
+
+      if (!started) {
+        parallelIsSpeakingRef.current = false;
+        // Restore to queue so we can retry after next user gesture.
+        parallelPendingSpeakRef.current = `${toSpeak} ${String(parallelPendingSpeakRef.current || "").trim()}`.trim();
+        return;
       }
 
       lastSpokenTranslationRef.current = toSpeak;
@@ -1484,6 +1527,13 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       voiceModeOnRef.current = true;
       voiceModeTokenRef.current += 1;
       stopSpeaking();
+
+      // Unlock parallel audio on a user gesture so TTS can play while recording.
+      try {
+        await ensureParallelAudioUnlocked();
+      } catch {
+        // ignore
+      }
       await startRecording({ force: true });
     } catch (e) {
       toast.error(e?.message || "Failed to start voice");
