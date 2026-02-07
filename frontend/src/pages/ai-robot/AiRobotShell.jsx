@@ -105,6 +105,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const voiceModeOnRef = useRef(false);
 
   const aiSpeakingRef = useRef(false);
+  const suppressRecognitionRef = useRef(false);
 
   const stopTimerRef = useRef(null);
   const audioRef = useRef(null);
@@ -172,6 +173,13 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       const blob = new Blob([buffer], { type: "audio/mpeg" });
       const url = URL.createObjectURL(blob);
       if (audioRef.current) {
+        suppressRecognitionRef.current = true;
+        try {
+          if (recognitionRef.current) recognitionRef.current.stop();
+        } catch {
+          // ignore
+        }
+
         aiSpeakingRef.current = true;
         setIsResponding(true);
         audioRef.current.muted = false;
@@ -217,6 +225,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       if (!rec || rec.state === "inactive") return;
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SpeechRecognition) return;
+      if (suppressRecognitionRef.current) return;
 
       // Restart recognition so the new language takes effect.
       if (recognitionRef.current) {
@@ -261,11 +270,13 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       recognition.onend = () => {
         try {
           if (!voiceModeOnRef.current) return;
+          if (suppressRecognitionRef.current) return;
           if (recognitionSessionTokenRef.current !== sessionToken) return;
           if (rec.state === "inactive") return;
           setTimeout(() => {
             try {
               if (!voiceModeOnRef.current) return;
+              if (suppressRecognitionRef.current) return;
               if (recognitionSessionTokenRef.current !== sessionToken) return;
               if (rec.state === "inactive") return;
               recognition.start();
@@ -393,6 +404,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
 
         // Pause recognition while speaking to reduce echo.
         try {
+          suppressRecognitionRef.current = true;
           if (recognitionRef.current) recognitionRef.current.stop();
         } catch {
           // ignore
@@ -422,6 +434,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         el.src = url;
         el.onended = () => {
           isTranslateSpeakingRef.current = false;
+          suppressRecognitionRef.current = false;
           URL.revokeObjectURL(url);
 
           // Resume recognition right after speaking ends
@@ -433,58 +446,69 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) return;
 
-            const sessionToken = Date.now();
-            recognitionSessionTokenRef.current = sessionToken;
-            const recognition = new SpeechRecognition();
-            recognition.continuous = true;
-            recognition.interimResults = true;
-            recognition.lang = toSpeechRecognitionLang(translateSourceLanguage);
-
-            recognition.onstart = () => {
-              setShowTranscription(true);
-            };
-
-            recognition.onresult = (event) => {
-              let interim = "";
-              for (let i = event.resultIndex; i < event.results.length; i += 1) {
-                const result = event.results[i];
-                const t = result?.[0]?.transcript || "";
-                if (result?.isFinal) {
-                  liveTranscriptFinalRef.current = `${liveTranscriptFinalRef.current} ${t}`.trim();
-                } else {
-                  interim += t;
-                }
-              }
-              const combined = `${liveTranscriptFinalRef.current} ${interim}`.trim();
-              setLiveTranscription(combined);
-            };
-
-            recognition.onerror = (event) => {
-              console.error("Speech recognition error:", event.error);
-            };
-
-            recognition.onend = () => {
+            // Let the output audio tail settle before listening again.
+            setTimeout(() => {
               try {
-                if (!voiceModeOnRef.current) return;
-                if (recognitionSessionTokenRef.current !== sessionToken) return;
-                if (rec.state === "inactive") return;
-                setTimeout(() => {
+                if (suppressRecognitionRef.current) return;
+
+                const sessionToken = Date.now();
+                recognitionSessionTokenRef.current = sessionToken;
+                const recognition = new SpeechRecognition();
+                recognition.continuous = true;
+                recognition.interimResults = true;
+                recognition.lang = toSpeechRecognitionLang(translateSourceLanguage);
+
+                recognition.onstart = () => {
+                  setShowTranscription(true);
+                };
+
+                recognition.onresult = (event) => {
+                  let interim = "";
+                  for (let i = event.resultIndex; i < event.results.length; i += 1) {
+                    const result = event.results[i];
+                    const t = result?.[0]?.transcript || "";
+                    if (result?.isFinal) {
+                      liveTranscriptFinalRef.current = `${liveTranscriptFinalRef.current} ${t}`.trim();
+                    } else {
+                      interim += t;
+                    }
+                  }
+                  const combined = `${liveTranscriptFinalRef.current} ${interim}`.trim();
+                  setLiveTranscription(combined);
+                };
+
+                recognition.onerror = (event) => {
+                  console.error("Speech recognition error:", event.error);
+                };
+
+                recognition.onend = () => {
                   try {
                     if (!voiceModeOnRef.current) return;
+                    if (suppressRecognitionRef.current) return;
                     if (recognitionSessionTokenRef.current !== sessionToken) return;
                     if (rec.state === "inactive") return;
-                    recognition.start();
+                    setTimeout(() => {
+                      try {
+                        if (!voiceModeOnRef.current) return;
+                        if (suppressRecognitionRef.current) return;
+                        if (recognitionSessionTokenRef.current !== sessionToken) return;
+                        if (rec.state === "inactive") return;
+                        recognition.start();
+                      } catch {
+                        // ignore
+                      }
+                    }, 250);
                   } catch {
                     // ignore
                   }
-                }, 250);
+                };
+
+                recognition.start();
+                recognitionRef.current = recognition;
               } catch {
                 // ignore
               }
-            };
-
-            recognition.start();
-            recognitionRef.current = recognition;
+            }, 500);
           } catch {
             // ignore
           }
@@ -736,11 +760,13 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
             // If voice mode is still ON and we are still recording, restart recognition.
             try {
               if (!voiceModeOnRef.current) return;
+              if (suppressRecognitionRef.current) return;
               if (recognitionSessionTokenRef.current !== sessionToken) return;
               if (rec.state === "inactive") return;
               setTimeout(() => {
                 try {
                   if (!voiceModeOnRef.current) return;
+                  if (suppressRecognitionRef.current) return;
                   if (recognitionSessionTokenRef.current !== sessionToken) return;
                   if (rec.state === "inactive") return;
                   recognition.start();
@@ -1003,10 +1029,15 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     const onEnded = () => {
       aiSpeakingRef.current = false;
       setIsResponding(false);
+
+      // Allow recognition again after a short delay so we don't capture the audio tail.
+      suppressRecognitionRef.current = false;
+
       if (!voiceModeOn) return;
       if (isRecording || isTranscribing || isResponding) return;
       setTimeout(() => {
         if (!voiceModeOn) return;
+        if (suppressRecognitionRef.current) return;
         startRecording();
       }, 250);
     };
@@ -1014,6 +1045,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       if (!aiSpeakingRef.current) return;
       aiSpeakingRef.current = false;
       setIsResponding(false);
+      suppressRecognitionRef.current = false;
     };
     el.addEventListener("ended", onEnded);
     el.addEventListener("pause", onPause);
