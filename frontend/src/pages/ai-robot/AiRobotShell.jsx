@@ -140,6 +140,9 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [inputLines, setInputLines] = useState([]);
   const [translatedLines, setTranslatedLines] = useState([]);
 
+  const [inputHighlightClass, setInputHighlightClass] = useState("text-green-300");
+  const [translatedHighlightClass, setTranslatedHighlightClass] = useState("text-green-300");
+
   const translatedFullRef = useRef("");
   const lastTranslatedForInputRef = useRef("");
   const [translateSettingsModalOpen, setTranslateSettingsModalOpen] = useState(false);
@@ -151,6 +154,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const suppressListeningRef = useRef(false);
 
   const lastInputActivityAtRef = useRef(0);
+  const lastPauseBucketRef = useRef("new");
   const sentenceBoundaryTimerRef = useRef(null);
   const pauseSpeakTimerRef = useRef(null);
   const pendingSpeakTextRef = useRef("");
@@ -324,6 +328,22 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       if (next.length <= 4) return next;
       return [cleaned];
     });
+  };
+
+  const pauseBucketToClass = (bucket) => {
+    const b = String(bucket || "").toLowerCase();
+    if (b === "p1") return "text-yellow-300";
+    if (b === "p2") return "text-orange-300";
+    if (b === "p3") return "text-red-300";
+    return "text-green-300";
+  };
+
+  const pauseBucketToDelayMs = (bucket) => {
+    const b = String(bucket || "").toLowerCase();
+    if (b === "p2") return 2000;
+    if (b === "p3") return 3000;
+    // p1 or new
+    return 1000;
   };
 
   const resetLiveTexts = () => {
@@ -640,7 +660,21 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     }
 
     // Track input activity and handle sentence boundaries.
-    lastInputActivityAtRef.current = Date.now();
+    const now = Date.now();
+    const prevAt = lastInputActivityAtRef.current || 0;
+    const gapMs = prevAt ? now - prevAt : 999999;
+    lastInputActivityAtRef.current = now;
+
+    // Pause-aware highlighting bucket
+    let bucket = "new";
+    if (gapMs > 3000) bucket = "new";
+    else if (gapMs > 2000) bucket = "p3";
+    else if (gapMs > 1000) bucket = "p2";
+    else if (gapMs > 0) bucket = "p1";
+    lastPauseBucketRef.current = bucket;
+    const cls = pauseBucketToClass(bucket);
+    setInputHighlightClass(cls);
+    setTranslatedHighlightClass(cls);
     try {
       if (sentenceBoundaryTimerRef.current) clearTimeout(sentenceBoundaryTimerRef.current);
       sentenceBoundaryTimerRef.current = setTimeout(() => {
@@ -690,6 +724,12 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
 
         setTranslatedBaseText(prev);
         setTranslatedNewText(segment);
+        // Apply same pause-aware highlight color to translated segment
+        try {
+          setTranslatedHighlightClass(pauseBucketToClass(lastPauseBucketRef.current));
+        } catch {
+          // ignore
+        }
         // Queue this segment to speak on pause
         if (segment) {
           pendingSpeakTextRef.current = `${String(pendingSpeakTextRef.current || "").trim()} ${segment}`.trim();
@@ -703,7 +743,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         if (translateReqTokenRef.current !== token) return;
         setIsTranslating(false);
       }
-    }, 200);
+    }, 450);
 
     return () => clearTimeout(id);
   }, [liveTranscription, translateTargetLanguage, translateSourceLanguage, translateEnabled, showTranscription]);
@@ -724,7 +764,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         if (parallelSpeakTimerRef.current) clearTimeout(parallelSpeakTimerRef.current);
         parallelSpeakTimerRef.current = setTimeout(() => {
           speakTranslatedTextParallelQueued();
-        }, 80);
+        }, 180);
       } catch {
         // ignore
       }
@@ -737,6 +777,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
 
     try {
       if (pauseSpeakTimerRef.current) clearTimeout(pauseSpeakTimerRef.current);
+      const requiredDelay = pauseBucketToDelayMs(lastPauseBucketRef.current);
       pauseSpeakTimerRef.current = setTimeout(() => {
         try {
           if (!translateEnabled) return;
@@ -745,7 +786,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
           if (isTranslateSpeakingRef.current) return;
 
           const since = Date.now() - (lastInputActivityAtRef.current || 0);
-          if (since < 1000) return;
+          if (since < requiredDelay) return;
 
           const toSpeak = String(pendingSpeakTextRef.current || "").trim();
           if (!toSpeak) return;
@@ -968,8 +1009,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       };
 
       // Timeslice gives us a continuous stream of chunks for Whisper live STT
-      // Lower timeslice => lower latency for Parallel mode
-      rec.start(400);
+      rec.start(900);
       setRecorder(rec);
       setIsRecording(true);
 
@@ -1061,7 +1101,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
 
               const slice = whisperLiveChunksRef.current.splice(0);
               const blob = new Blob(slice, { type: mimeType || "audio/webm" });
-              if (!blob || blob.size < 900) return;
+              if (!blob || blob.size < 1500) return;
 
               whisperLiveInFlightRef.current = true;
               const res = await aiRobotStt({ audioBlob: blob });
@@ -1075,7 +1115,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
             } finally {
               whisperLiveInFlightRef.current = false;
             }
-          }, 800);
+          }, 1500);
         }
       } catch {
         // ignore
@@ -1726,7 +1766,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                         <div>
                           <span>{inputBaseText}</span>
                           {inputNewText ? (
-                            <span className="text-green-300">{inputBaseText ? ` ${inputNewText}` : inputNewText}</span>
+                            <span className={inputHighlightClass}>{inputBaseText ? ` ${inputNewText}` : inputNewText}</span>
                           ) : null}
                         </div>
                       ) : null}
@@ -1858,7 +1898,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
 
                           <span>{translatedBaseText}</span>
                           {translatedNewText ? (
-                            <span className="text-green-300">{translatedBaseText ? ` ${translatedNewText}` : translatedNewText}</span>
+                            <span className={translatedHighlightClass}>{translatedBaseText ? ` ${translatedNewText}` : translatedNewText}</span>
                           ) : isTranslating ? (
                             <span className="opacity-70"> Translating...</span>
                           ) : null}
