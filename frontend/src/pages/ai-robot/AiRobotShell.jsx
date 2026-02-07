@@ -163,6 +163,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [bottomSourceLanguage, setBottomSourceLanguage] = useState("Auto");
   const [bottomTargetLanguage, setBottomTargetLanguage] = useState("Hindi");
   const [bottomVoiceGender, setBottomVoiceGender] = useState("Male");
+  const [bottomVoiceMode, setBottomVoiceMode] = useState("parallel");
   const [bottomIsRecording, setBottomIsRecording] = useState(false);
   const [bottomRecorder, setBottomRecorder] = useState(null);
   const [bottomLiveTranscription, setBottomLiveTranscription] = useState("");
@@ -184,6 +185,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const bottomIsSpeakingRef = useRef(false);
   const bottomLastSpokenRef = useRef("");
   const bottomPendingSpeakRef = useRef("");
+  const bottomPauseSpeakTimerRef = useRef(null);
+  const bottomPendingSpeakSeqRef = useRef("");
 
   const bottomLastInputActivityAtRef = useRef(0);
   const bottomSentenceBoundaryTimerRef = useRef(null);
@@ -560,10 +563,18 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     bottomLastSpokenRef.current = "";
     bottomLastInputActivityAtRef.current = 0;
 
+    bottomPendingSpeakRef.current = "";
+    bottomPendingSpeakSeqRef.current = "";
+
     try {
       if (bottomSentenceBoundaryTimerRef.current) {
         clearTimeout(bottomSentenceBoundaryTimerRef.current);
         bottomSentenceBoundaryTimerRef.current = null;
+      }
+
+      if (bottomPauseSpeakTimerRef.current) {
+        clearTimeout(bottomPauseSpeakTimerRef.current);
+        bottomPauseSpeakTimerRef.current = null;
       }
     } catch {
       // ignore
@@ -778,6 +789,19 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       return;
     }
 
+    if (voiceModeOnRef.current) {
+      toast.error("Turn OFF top voice to use bottom voice");
+      return;
+    }
+
+    // Start is now handled via mode selection (Sequence/Parallel)
+  };
+
+  const startBottomVoiceWithMode = (mode) => {
+    const m = mode === "sequence" ? "sequence" : "parallel";
+    setBottomVoiceMode(m);
+
+    if (bottomVoiceOnRef.current) return;
     if (voiceModeOnRef.current) {
       toast.error("Turn OFF top voice to use bottom voice");
       return;
@@ -1019,6 +1043,9 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         bottomTranslatedFullRef.current = nextFull;
         setBottomTranslatedBaseText(prev);
         setBottomTranslatedNewText(segment);
+        if (segment && bottomVoiceMode === "sequence") {
+          bottomPendingSpeakSeqRef.current = `${String(bottomPendingSpeakSeqRef.current || "").trim()} ${segment}`.trim();
+        }
         bottomLastTranslatedForInputRef.current = englishText;
       } catch {
         if (bottomTranslateReqTokenRef.current !== token) return;
@@ -1031,7 +1058,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     }, 300);
 
     return () => clearTimeout(id);
-  }, [bottomLiveTranscription, bottomTargetLanguage, bottomSourceLanguage, bottomTranslateEnabled, bottomShowTranscription]);
+  }, [bottomLiveTranscription, bottomTargetLanguage, bottomSourceLanguage, bottomTranslateEnabled, bottomShowTranscription, bottomVoiceMode]);
 
   useEffect(() => {
     if (!bottomShowTranscription) return;
@@ -1042,9 +1069,39 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     if (!immediate) return;
     if (immediate === bottomLastSpokenRef.current) return;
 
-    // Bottom mode always speaks immediately in parallel.
-    speakBottomTranslatedTextImmediate(immediate);
-  }, [bottomTranslatedNewText, bottomShowTranscription, bottomTranslateEnabled, bottomVoiceGender]);
+    if (bottomVoiceMode === "parallel") {
+      // Call-like: speak immediately in parallel.
+      speakBottomTranslatedTextImmediate(immediate);
+      return;
+    }
+
+    // Sequence: speak on pause (~1s silence)
+    if (!bottomPendingSpeakSeqRef.current) return;
+    try {
+      if (bottomPauseSpeakTimerRef.current) clearTimeout(bottomPauseSpeakTimerRef.current);
+      bottomPauseSpeakTimerRef.current = setTimeout(() => {
+        try {
+          if (!bottomVoiceOnRef.current) return;
+          if (!bottomShowTranscription) return;
+          if (!bottomTranslateEnabled) return;
+          if (bottomIsSpeakingRef.current) return;
+          if (bottomVoiceMode !== "sequence") return;
+
+          const since = Date.now() - (bottomLastInputActivityAtRef.current || 0);
+          if (since < 1000) return;
+
+          const queued = String(bottomPendingSpeakSeqRef.current || "").trim();
+          if (!queued) return;
+          bottomPendingSpeakSeqRef.current = "";
+          speakBottomTranslatedTextImmediate(queued);
+        } catch {
+          // ignore
+        }
+      }, 1000);
+    } catch {
+      // ignore
+    }
+  }, [bottomTranslatedNewText, bottomShowTranscription, bottomTranslateEnabled, bottomVoiceGender, bottomVoiceMode]);
 
   useEffect(() => {
     return () => {
@@ -1988,7 +2045,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
 
                 {/* Live Transcription Bar */}
                 {showTranscription && liveTranscription && (
-                  <div className="bg-base-300 rounded-lg p-3 border border-base-content/10 animate-fade-in">
+                  <div className="bg-base-300 rounded-lg p-3 pr-24 border border-base-content/10 animate-fade-in">
                     <p className="text-xs opacity-50 mb-1">You said:</p>
                     <div className="text-sm opacity-80 whitespace-pre-wrap break-words">
                       <span>{inputBaseText}</span>
@@ -2098,25 +2155,40 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                 <div className="mt-3 border border-base-300 rounded-lg bg-base-200 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        className={`btn btn-circle ${bottomVoiceOn ? "btn-error ring ring-error ring-offset-2 ring-offset-base-200" : "btn-primary"}`}
-                        onClick={toggleBottomVoice}
-                        aria-pressed={bottomVoiceOn}
-                        disabled={voiceModeOn}
-                        title={voiceModeOn ? "Top voice is ON" : bottomVoiceOn ? "Bottom Voice OFF" : "Bottom Voice ON"}
-                      >
-                        {bottomVoiceOn ? (
+                      <div className="dropdown">
+                        <button
+                          type="button"
+                          className={`btn btn-circle ${bottomVoiceOn ? "btn-error ring ring-error ring-offset-2 ring-offset-base-200" : "btn-primary"}`}
+                          onClick={() => {
+                            if (bottomVoiceOn) {
+                              toggleBottomVoice();
+                              return;
+                            }
+                          }}
+                          aria-pressed={bottomVoiceOn}
+                          disabled={voiceModeOn}
+                          tabIndex={0}
+                          title={voiceModeOn ? "Top voice is ON" : bottomVoiceOn ? "Bottom Voice OFF" : "Choose Sequence/Parallel"}
+                        >
                           <span className="relative">
-                            {bottomIsRecording ? (
+                            {bottomVoiceOn && bottomIsRecording ? (
                               <span className="absolute -inset-2 rounded-full bg-error/30 animate-ping" />
                             ) : null}
                             <Mic className="size-5 relative" />
                           </span>
-                        ) : (
-                          <MicOff className="size-5" />
-                        )}
-                      </button>
+                        </button>
+
+                        {!bottomVoiceOn ? (
+                          <ul tabIndex={0} className="dropdown-content menu bg-base-100 rounded-box z-[1] w-40 p-2 shadow">
+                            <li>
+                              <button type="button" onClick={() => startBottomVoiceWithMode("sequence")}>Sequence</button>
+                            </li>
+                            <li>
+                              <button type="button" onClick={() => startBottomVoiceWithMode("parallel")}>Parallel</button>
+                            </li>
+                          </ul>
+                        ) : null}
+                      </div>
 
                       {bottomIsRecording && (
                         <button
