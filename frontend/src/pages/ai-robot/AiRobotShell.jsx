@@ -157,6 +157,38 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const whisperLiveInFlightRef = useRef(false);
   const whisperLiveTokenRef = useRef(0);
 
+  const [bottomVoiceOn, setBottomVoiceOn] = useState(false);
+  const bottomVoiceOnRef = useRef(false);
+  const [bottomTranslateEnabled, setBottomTranslateEnabled] = useState(true);
+  const [bottomIsRecording, setBottomIsRecording] = useState(false);
+  const [bottomRecorder, setBottomRecorder] = useState(null);
+  const [bottomLiveTranscription, setBottomLiveTranscription] = useState("");
+  const [bottomShowTranscription, setBottomShowTranscription] = useState(false);
+  const bottomTranscriptFinalRef = useRef("");
+  const bottomStopTimerRef = useRef(null);
+
+  const [bottomInputBaseText, setBottomInputBaseText] = useState("");
+  const [bottomInputNewText, setBottomInputNewText] = useState("");
+  const [bottomTranslatedBaseText, setBottomTranslatedBaseText] = useState("");
+  const [bottomTranslatedNewText, setBottomTranslatedNewText] = useState("");
+  const bottomTranslatedFullRef = useRef("");
+  const bottomLastTranslatedForInputRef = useRef("");
+  const bottomIsTranslatingRef = useRef(false);
+  const bottomTranslateReqTokenRef = useRef(0);
+
+  const bottomTranslateAudioRef = useRef(null);
+  const bottomSpeakTokenRef = useRef(0);
+  const bottomIsSpeakingRef = useRef(false);
+  const bottomLastSpokenRef = useRef("");
+
+  const bottomLastInputActivityAtRef = useRef(0);
+  const bottomSentenceBoundaryTimerRef = useRef(null);
+
+  const bottomWhisperChunksRef = useRef([]);
+  const bottomWhisperTimerRef = useRef(null);
+  const bottomWhisperInFlightRef = useRef(false);
+  const bottomWhisperTokenRef = useRef(0);
+
   const [voiceStartModalOpen, setVoiceStartModalOpen] = useState(false);
   const [voiceStartWantsTranslate, setVoiceStartWantsTranslate] = useState(false);
 
@@ -221,6 +253,10 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   useEffect(() => {
     voiceModeOnRef.current = voiceModeOn;
   }, [voiceModeOn]);
+
+  useEffect(() => {
+    bottomVoiceOnRef.current = bottomVoiceOn;
+  }, [bottomVoiceOn]);
 
   useEffect(() => {
     try {
@@ -508,6 +544,232 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     }
   };
 
+  const resetBottomLiveTexts = () => {
+    setBottomLiveTranscription("");
+    bottomTranscriptFinalRef.current = "";
+    setBottomInputBaseText("");
+    setBottomInputNewText("");
+    setBottomTranslatedBaseText("");
+    setBottomTranslatedNewText("");
+    bottomTranslatedFullRef.current = "";
+    bottomLastTranslatedForInputRef.current = "";
+    bottomLastSpokenRef.current = "";
+    bottomLastInputActivityAtRef.current = 0;
+
+    try {
+      if (bottomSentenceBoundaryTimerRef.current) {
+        clearTimeout(bottomSentenceBoundaryTimerRef.current);
+        bottomSentenceBoundaryTimerRef.current = null;
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const speakBottomTranslatedTextImmediate = async (text) => {
+    const cleaned = String(text || "").trim();
+    if (!cleaned) return;
+    const token = ++bottomSpeakTokenRef.current;
+
+    try {
+      if (bottomSpeakTokenRef.current !== token) return;
+      if (bottomIsSpeakingRef.current) return;
+
+      bottomIsSpeakingRef.current = true;
+      const buf = await aiRobotTts({ text: cleaned, voiceGender: translateVoiceGender });
+      if (bottomSpeakTokenRef.current !== token) return;
+      if (!buf) return;
+
+      const blob = new Blob([buf], { type: "audio/mpeg" });
+      const url = URL.createObjectURL(blob);
+      const el = bottomTranslateAudioRef.current;
+      if (!el) return;
+
+      try {
+        el.pause();
+        el.currentTime = 0;
+      } catch {
+        // ignore
+      }
+
+      el.src = url;
+      el.onended = () => {
+        bottomIsSpeakingRef.current = false;
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          // ignore
+        }
+      };
+
+      const p = el.play();
+      if (p && typeof p.catch === "function") {
+        p.catch(() => {
+          try {
+            URL.revokeObjectURL(url);
+          } catch {
+            // ignore
+          }
+        });
+      }
+
+      bottomLastSpokenRef.current = cleaned;
+    } catch {
+      bottomIsSpeakingRef.current = false;
+      // ignore
+    }
+  };
+
+  const bottomStartRecording = async () => {
+    try {
+      if (bottomIsRecording) return;
+      if (!bottomVoiceOnRef.current) return;
+
+      bottomWhisperChunksRef.current = [];
+      bottomWhisperInFlightRef.current = false;
+      bottomWhisperTokenRef.current += 1;
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      const mimeType = getSupportedMimeType();
+      const rec = mimeType
+        ? new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 128000 })
+        : new MediaRecorder(stream);
+
+      rec.ondataavailable = (e) => {
+        try {
+          if (!bottomVoiceOnRef.current) return;
+          if (!useWhisperForLive) return;
+          if (!e.data || e.data.size === 0) return;
+          bottomWhisperChunksRef.current.push(e.data);
+        } catch {
+          // ignore
+        }
+      };
+
+      rec.onstop = () => {
+        try {
+          stream.getTracks().forEach((t) => t.stop());
+        } catch {
+          // ignore
+        }
+
+        try {
+          if (bottomWhisperTimerRef.current) {
+            clearInterval(bottomWhisperTimerRef.current);
+            bottomWhisperTimerRef.current = null;
+          }
+          if (bottomStopTimerRef.current) {
+            clearTimeout(bottomStopTimerRef.current);
+            bottomStopTimerRef.current = null;
+          }
+        } catch {
+          // ignore
+        }
+
+        setBottomIsRecording(false);
+        setBottomRecorder(null);
+      };
+
+      rec.start(900);
+      setBottomRecorder(rec);
+      setBottomIsRecording(true);
+      setBottomShowTranscription(true);
+
+      // Whisper live STT pump
+      try {
+        if (useWhisperForLive) {
+          const token = bottomWhisperTokenRef.current;
+          if (bottomWhisperTimerRef.current) clearInterval(bottomWhisperTimerRef.current);
+          bottomWhisperTimerRef.current = setInterval(async () => {
+            try {
+              if (bottomWhisperTokenRef.current !== token) return;
+              if (!bottomVoiceOnRef.current) return;
+              if (bottomWhisperInFlightRef.current) return;
+              if (!bottomWhisperChunksRef.current.length) return;
+
+              const slice = bottomWhisperChunksRef.current.splice(0);
+              const blob = new Blob(slice, { type: mimeType || "audio/webm" });
+              if (!blob || blob.size < 1500) return;
+
+              bottomWhisperInFlightRef.current = true;
+              const res = await aiRobotStt({ audioBlob: blob });
+              const text = String(res?.text || "").trim();
+              if (text) {
+                bottomTranscriptFinalRef.current = `${bottomTranscriptFinalRef.current} ${text}`.trim();
+                setBottomLiveTranscription(bottomTranscriptFinalRef.current);
+              }
+            } catch {
+              // ignore
+            } finally {
+              bottomWhisperInFlightRef.current = false;
+            }
+          }, 1500);
+        }
+      } catch {
+        // ignore
+      }
+
+      if (VOICE_CHAT_MAX_MS > 0) {
+        bottomStopTimerRef.current = setTimeout(() => {
+          try {
+            if (rec.state !== "inactive") rec.stop();
+          } catch {
+            // ignore
+          }
+        }, VOICE_CHAT_MAX_MS);
+      }
+    } catch (e) {
+      console.error("Bottom recording failed:", e);
+      setBottomIsRecording(false);
+      setBottomRecorder(null);
+    }
+  };
+
+  const bottomStopRecording = () => {
+    try {
+      if (!bottomRecorder) return;
+      try {
+        if (bottomStopTimerRef.current) {
+          clearTimeout(bottomStopTimerRef.current);
+          bottomStopTimerRef.current = null;
+        }
+      } catch {
+        // ignore
+      }
+      bottomRecorder.stop();
+    } catch {
+      // ignore
+    }
+  };
+
+  const toggleBottomVoice = () => {
+    if (bottomVoiceOnRef.current) {
+      setBottomVoiceOn(false);
+      try {
+        if (bottomRecorder && bottomRecorder.state !== "inactive") {
+          bottomRecorder.stop();
+        }
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    setBottomVoiceOn(true);
+    resetBottomLiveTexts();
+    setTimeout(() => {
+      bottomStartRecording();
+    }, 50);
+  };
+
   useEffect(() => {
     if (!showTranscription) {
       setIsTranslating(false);
@@ -656,6 +918,113 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       // ignore
     }
   }, [translatedNewText, translateEnabled, showTranscription, isTranslating, translateVoiceGender, translateSourceLanguage, isRecording, recorder, parallelTranslateVoiceOn]);
+
+  useEffect(() => {
+    if (!bottomShowTranscription) {
+      bottomIsTranslatingRef.current = false;
+      setBottomInputBaseText("");
+      setBottomInputNewText("");
+      setBottomTranslatedBaseText("");
+      setBottomTranslatedNewText("");
+      bottomTranslatedFullRef.current = "";
+      bottomLastTranslatedForInputRef.current = "";
+      return;
+    }
+    if (!bottomTranslateEnabled) {
+      bottomIsTranslatingRef.current = false;
+      setBottomInputBaseText("");
+      setBottomInputNewText("");
+      setBottomTranslatedBaseText("");
+      setBottomTranslatedNewText("");
+      bottomTranslatedFullRef.current = "";
+      bottomLastTranslatedForInputRef.current = "";
+      return;
+    }
+
+    const englishText = String(bottomLiveTranscription || "").trim();
+    if (!englishText) {
+      bottomIsTranslatingRef.current = false;
+      setBottomInputBaseText("");
+      setBottomInputNewText("");
+      setBottomTranslatedBaseText("");
+      setBottomTranslatedNewText("");
+      bottomTranslatedFullRef.current = "";
+      bottomLastTranslatedForInputRef.current = "";
+      return;
+    }
+
+    bottomLastInputActivityAtRef.current = Date.now();
+    try {
+      if (bottomSentenceBoundaryTimerRef.current) clearTimeout(bottomSentenceBoundaryTimerRef.current);
+      bottomSentenceBoundaryTimerRef.current = setTimeout(() => {
+        try {
+          const since = Date.now() - (bottomLastInputActivityAtRef.current || 0);
+          if (since < 3000) return;
+          finalizeBottomHighlight();
+        } catch {
+          // ignore
+        }
+      }, 3000);
+    } catch {
+      // ignore
+    }
+
+    const prevInput = bottomLastTranslatedForInputRef.current;
+    const idx = commonPrefixIndex(prevInput, englishText);
+    const base = englishText.slice(0, idx).trimStart();
+    const newlyAdded = englishText.slice(idx).trim();
+    setBottomInputBaseText(base);
+    setBottomInputNewText(newlyAdded);
+
+    if (!newlyAdded) {
+      setBottomTranslatedBaseText(bottomTranslatedFullRef.current);
+      setBottomTranslatedNewText("");
+      bottomLastTranslatedForInputRef.current = englishText;
+      return;
+    }
+
+    const token = ++bottomTranslateReqTokenRef.current;
+    const id = setTimeout(async () => {
+      try {
+        bottomIsTranslatingRef.current = true;
+        const res = await aiRobotTranslate({
+          text: newlyAdded,
+          targetLanguage: translateTargetLanguage,
+          sourceLanguage: translateSourceLanguage,
+        });
+        if (bottomTranslateReqTokenRef.current !== token) return;
+        const segment = String(res?.translatedText || "").trim();
+        const prev = String(bottomTranslatedFullRef.current || "").trim();
+        const nextFull = segment ? (prev ? `${prev} ${segment}` : segment) : prev;
+        bottomTranslatedFullRef.current = nextFull;
+        setBottomTranslatedBaseText(prev);
+        setBottomTranslatedNewText(segment);
+        bottomLastTranslatedForInputRef.current = englishText;
+      } catch {
+        if (bottomTranslateReqTokenRef.current !== token) return;
+        setBottomTranslatedBaseText(bottomTranslatedFullRef.current);
+        setBottomTranslatedNewText("");
+      } finally {
+        if (bottomTranslateReqTokenRef.current !== token) return;
+        bottomIsTranslatingRef.current = false;
+      }
+    }, 300);
+
+    return () => clearTimeout(id);
+  }, [bottomLiveTranscription, translateTargetLanguage, translateSourceLanguage, bottomTranslateEnabled, bottomShowTranscription]);
+
+  useEffect(() => {
+    if (!bottomShowTranscription) return;
+    if (!bottomTranslateEnabled) return;
+    if (bottomIsSpeakingRef.current) return;
+
+    const immediate = String(bottomTranslatedNewText || "").trim();
+    if (!immediate) return;
+    if (immediate === bottomLastSpokenRef.current) return;
+
+    // Bottom mode always speaks immediately in parallel.
+    speakBottomTranslatedTextImmediate(immediate);
+  }, [bottomTranslatedNewText, bottomShowTranscription, bottomTranslateEnabled, translateVoiceGender]);
 
   useEffect(() => {
     return () => {
@@ -1725,56 +2094,82 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                   )}
                 </div>
 
-                {showTranscription && translateEnabled && (
-                  <div className="sticky bottom-0 bg-base-200/95 backdrop-blur border border-base-300 rounded-lg p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs opacity-50 mb-1">You said:</p>
-                        <div className="text-sm opacity-80 whitespace-pre-wrap break-words">
-                          <span>{inputBaseText}</span>
-                          {inputNewText ? (
-                            <span className="text-green-300">{inputBaseText ? ` ${inputNewText}` : inputNewText}</span>
-                          ) : null}
-                        </div>
+                <div className="mt-3 border border-base-300 rounded-lg bg-base-200 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className={`btn btn-circle ${bottomVoiceOn ? "btn-error ring ring-error ring-offset-2 ring-offset-base-200" : "btn-primary"}`}
+                        onClick={toggleBottomVoice}
+                        aria-pressed={bottomVoiceOn}
+                        title={bottomVoiceOn ? "Bottom Voice OFF" : "Bottom Voice ON"}
+                      >
+                        {bottomVoiceOn ? (
+                          <span className="relative">
+                            {bottomIsRecording ? (
+                              <span className="absolute -inset-2 rounded-full bg-error/30 animate-ping" />
+                            ) : null}
+                            <Mic className="size-5 relative" />
+                          </span>
+                        ) : (
+                          <MicOff className="size-5" />
+                        )}
+                      </button>
 
-                        <p className="text-xs opacity-50 mt-3 mb-1">
-                          {translateSourceLanguage} → {translateTargetLanguage}:
-                        </p>
-                        <div className="text-sm opacity-90 whitespace-pre-wrap break-words">
-                          <span>{translatedBaseText}</span>
-                          {translatedNewText ? (
-                            <span className="text-green-300">{translatedBaseText ? ` ${translatedNewText}` : translatedNewText}</span>
-                          ) : isTranslating ? (
-                            <span className="opacity-70"> Translating...</span>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col items-center gap-2">
+                      {bottomIsRecording && (
                         <button
                           type="button"
-                          className={`btn btn-sm btn-circle ${parallelTranslateVoiceOn ? "btn-primary" : "btn-outline"}`}
-                          onClick={() => setParallelTranslateVoiceOn((v) => !v)}
-                          title={parallelTranslateVoiceOn ? "Parallel voice ON" : "Parallel voice OFF"}
+                          className="btn btn-success btn-sm"
+                          onClick={bottomStopRecording}
+                          title="Complete"
                         >
-                          <Mic className="size-4" />
+                          Completed
                         </button>
-
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-circle btn-ghost"
-                          onClick={resetLiveTexts}
-                          title="Reset"
-                        >
-                          <RotateCcw className="size-4" />
-                        </button>
-                      </div>
+                      )}
                     </div>
+
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost"
+                      onClick={resetBottomLiveTexts}
+                      title="Reset"
+                    >
+                      <RotateCcw className="size-4" />
+                    </button>
                   </div>
-                )}
+
+                  {bottomShowTranscription && bottomLiveTranscription ? (
+                    <div className="mt-3">
+                      <p className="text-xs opacity-50 mb-1">You said:</p>
+                      <div className="text-sm opacity-80 whitespace-pre-wrap break-words">
+                        <span>{bottomInputBaseText}</span>
+                        {bottomInputNewText ? (
+                          <span className="text-green-300">{bottomInputBaseText ? ` ${bottomInputNewText}` : bottomInputNewText}</span>
+                        ) : null}
+                      </div>
+
+                      {bottomTranslateEnabled ? (
+                        <div className="mt-3">
+                          <p className="text-xs opacity-50 mb-1">
+                            {translateSourceLanguage} → {translateTargetLanguage}:
+                          </p>
+                          <div className="text-sm opacity-90 whitespace-pre-wrap break-words">
+                            <span>{bottomTranslatedBaseText}</span>
+                            {bottomTranslatedNewText ? (
+                              <span className="text-green-300">{bottomTranslatedBaseText ? ` ${bottomTranslatedNewText}` : bottomTranslatedNewText}</span>
+                            ) : bottomIsTranslatingRef.current ? (
+                              <span className="opacity-70"> Translating...</span>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
 
                 <audio ref={audioRef} />
                 <audio ref={translateAudioRef} />
+                <audio ref={bottomTranslateAudioRef} />
               </div>
             </div>
           </div>
