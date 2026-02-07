@@ -118,8 +118,6 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [voiceSamples, setVoiceSamples] = useState([]);
   const [creatingVoiceId, setCreatingVoiceId] = useState(false);
 
-  // New states for UI redesign
-  const [sidebarMinimized, setSidebarMinimized] = useState(false);
   const [liveTranscription, setLiveTranscription] = useState("");
   const [showTranscription, setShowTranscription] = useState(false);
 
@@ -154,9 +152,6 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const lastSpokenTranslationRef = useRef("");
   const isTranslateSpeakingRef = useRef(false);
   const suppressListeningRef = useRef(false);
-
-  const parallelAudioCtxRef = useRef(null);
-  const parallelAudioUnlockedRef = useRef(false);
 
   const lastInputActivityAtRef = useRef(0);
   const lastPauseBucketRef = useRef("new");
@@ -217,69 +212,6 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       }
     } catch {
       // ignore
-    }
-  };
-
-  const ensureParallelAudioUnlocked = async () => {
-    try {
-      if (parallelAudioUnlockedRef.current) return true;
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!Ctx) return false;
-      if (!parallelAudioCtxRef.current) {
-        parallelAudioCtxRef.current = new Ctx();
-      }
-
-      const ctx = parallelAudioCtxRef.current;
-      if (ctx.state === "suspended") {
-        try {
-          await ctx.resume();
-        } catch {
-          // ignore
-        }
-      }
-
-      // Play a near-silent buffer once to "unlock" audio on iOS/Safari.
-      try {
-        const buf = ctx.createBuffer(1, 1, ctx.sampleRate);
-        const src = ctx.createBufferSource();
-        src.buffer = buf;
-        src.connect(ctx.destination);
-        src.start(0);
-      } catch {
-        // ignore
-      }
-
-      parallelAudioUnlockedRef.current = true;
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const playParallelTtsArrayBuffer = async (arrayBuffer, { onEnded } = {}) => {
-    try {
-      const ok = await ensureParallelAudioUnlocked();
-      if (!ok) throw new Error("AudioContext not available");
-
-      const ctx = parallelAudioCtxRef.current;
-      if (!ctx) throw new Error("AudioContext missing");
-
-      // Decode mp3 and play through WebAudio (more reliable than <audio>.play() after async fetch).
-      const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0));
-      const src = ctx.createBufferSource();
-      src.buffer = decoded;
-      src.connect(ctx.destination);
-      src.onended = () => {
-        try {
-          onEnded?.();
-        } catch {
-          // ignore
-        }
-      };
-      src.start(0);
-      return true;
-    } catch {
-      return false;
     }
   };
 
@@ -487,22 +419,45 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       if (parallelTranslateSpeakTokenRef.current !== token) return;
       if (!buf) return;
 
+      const blob = new Blob([buf], { type: "audio/mpeg" });
+      const url = URL.createObjectURL(blob);
+      const el = parallelTranslateAudioRef.current;
+      if (!el) return;
+
       parallelPendingSpeakRef.current = "";
 
-      const started = await playParallelTtsArrayBuffer(buf, {
-        onEnded: () => {
-          parallelIsSpeakingRef.current = false;
-          setTimeout(() => {
-            speakTranslatedTextParallelQueued();
-          }, 20);
-        },
-      });
+      try {
+        el.pause();
+        el.currentTime = 0;
+      } catch {
+        // ignore
+      }
 
-      if (!started) {
+      el.src = url;
+      el.onended = () => {
         parallelIsSpeakingRef.current = false;
-        // Restore to queue so we can retry after next user gesture.
-        parallelPendingSpeakRef.current = `${toSpeak} ${String(parallelPendingSpeakRef.current || "").trim()}`.trim();
-        return;
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          // ignore
+        }
+        setTimeout(() => {
+          speakTranslatedTextParallelQueued();
+        }, 20);
+      };
+
+      const p = el.play();
+      if (p && typeof p.catch === "function") {
+        p.catch(() => {
+          parallelIsSpeakingRef.current = false;
+          // Restore to queue so we can retry if the user interacts (autoplay policies)
+          parallelPendingSpeakRef.current = `${toSpeak} ${String(parallelPendingSpeakRef.current || "").trim()}`.trim();
+          try {
+            URL.revokeObjectURL(url);
+          } catch {
+            // ignore
+          }
+        });
       }
 
       lastSpokenTranslationRef.current = toSpeak;
@@ -1527,13 +1482,6 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       voiceModeOnRef.current = true;
       voiceModeTokenRef.current += 1;
       stopSpeaking();
-
-      // Unlock parallel audio on a user gesture so TTS can play while recording.
-      try {
-        await ensureParallelAudioUnlocked();
-      } catch {
-        // ignore
-      }
       await startRecording({ force: true });
     } catch (e) {
       toast.error(e?.message || "Failed to start voice");
@@ -1736,54 +1684,17 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
           </div>
 
           <div className="flex flex-col gap-2 md:flex-row md:items-center justify-end">
-            <button type="button" className="btn btn-outline" onClick={openVoiceModal}>
+            <button
+              type="button"
+              className="btn btn-outline transition-transform duration-200 hover:-translate-y-0.5 hover:shadow"
+              onClick={openVoiceModal}
+            >
               Upload your Voice
             </button>
           </div>
         </div>
 
-
-
-        <div className={`flex flex-col lg:flex-row gap-4 min-h-[70vh] transition-all duration-300`}>
-          {/* Sidebar - Suggestions */}
-          <div className={`${sidebarMinimized ? 'lg:w-16' : 'lg:w-80'} w-full transition-all duration-300`}>
-            <div className="card bg-base-200 border border-base-300 h-full">
-              <div className="card-body p-4 gap-3">
-                <div className="flex items-center justify-between">
-                  <h2 className={`font-semibold ${sidebarMinimized ? 'hidden' : 'block'}`}>AI Robot</h2>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-ghost"
-                    onClick={() => setSidebarMinimized(!sidebarMinimized)}
-                    title={sidebarMinimized ? "Expand sidebar" : "Minimize sidebar"}
-                  >
-                    {sidebarMinimized ? '→' : '←'}
-                  </button>
-                </div>
-
-                {!sidebarMinimized && (
-                  <div className="space-y-3">
-                    <p className="text-xs opacity-50 mb-2">Suggestions:</p>
-                    {ROUTES.map((r) => (
-                      <Link
-                        key={r.path}
-                        to={r.path}
-                        className={`block text-sm transition-opacity hover:opacity-100 ${activeTab === r.path ? 'opacity-90 font-medium' : 'opacity-60'
-                          }`}
-                      >
-                        {r.label === "Home" ? "Job Interview" :
-                          r.label === "Interview" ? "Exercises" :
-                            r.label === "English Fluency" ? "English Proficiency" :
-                              r.label === "Language Learning" ? "Mathematics" :
-                                r.label === "Programming" ? "Programming" : r.label}
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
+        <div className="flex flex-col gap-4 min-h-[70vh]">
           <div className="flex-1 relative">
             <div className="card bg-base-200 border border-base-300 h-full">
               <div className="card-body p-4 gap-4">
@@ -1791,7 +1702,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                 <div className="absolute top-4 right-4 z-10 flex flex-col gap-2 items-center">
                   <button
                     type="button"
-                    className={`btn btn-circle ${voiceModeOn ? "btn-error ring ring-error ring-offset-2 ring-offset-base-200" : "btn-primary"}`}
+                    className={`btn btn-circle transition-transform duration-200 hover:scale-[1.03] ${voiceModeOn ? "btn-error ring ring-error ring-offset-2 ring-offset-base-200" : "btn-primary"}`}
                     disabled={isTranscribing || isResponding}
                     onClick={toggleVoiceMode}
                     aria-pressed={voiceModeOn}
@@ -1813,7 +1724,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                   {isRecording && (
                     <button
                       type="button"
-                      className="btn btn-success btn-sm"
+                      className="btn btn-success btn-sm transition-transform duration-200 hover:-translate-y-0.5"
                       onClick={stopRecording}
                       title="Complete and get AI response"
                     >

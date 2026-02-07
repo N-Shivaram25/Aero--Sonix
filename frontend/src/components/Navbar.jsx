@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { BellIcon, LogOutIcon, ShipWheelIcon } from "lucide-react";
@@ -7,11 +8,49 @@ import { useStreamChat } from "../context/StreamChatContext";
 import { useQuery } from "@tanstack/react-query";
 import { getFriendRequests } from "../lib/api";
 
+const seenStoreKey = "aerosonix_seen_notification_ids";
+
+const readSeenSet = () => {
+  try {
+    const raw = localStorage.getItem(seenStoreKey);
+    const arr = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(arr)) return new Set();
+    return new Set(arr.map((x) => String(x)));
+  } catch {
+    return new Set();
+  }
+};
+
+const getNotificationIds = (friendRequests) => {
+  const incoming = friendRequests?.incomingReqs || [];
+  const accepted = friendRequests?.acceptedReqs || [];
+  return [...incoming, ...accepted].map((x) => String(x?._id || "")).filter(Boolean);
+};
+
 const Navbar = () => {
   const { authUser } = useAuthUser();
   const { onlineMap } = useStreamChat();
   const location = useLocation();
   const isChatPage = location.pathname?.startsWith("/chat");
+  const [seenVersion, setSeenVersion] = useState(0);
+
+  useEffect(() => {
+    const onSeen = () => setSeenVersion((v) => v + 1);
+    try {
+      window.addEventListener("aerosonix-notifications-seen", onSeen);
+      window.addEventListener("storage", onSeen);
+    } catch {
+      // ignore
+    }
+    return () => {
+      try {
+        window.removeEventListener("aerosonix-notifications-seen", onSeen);
+        window.removeEventListener("storage", onSeen);
+      } catch {
+        // ignore
+      }
+    };
+  }, []);
 
   const { data: friendRequests } = useQuery({
     queryKey: ["friendRequests"],
@@ -20,8 +59,11 @@ const Navbar = () => {
     staleTime: 10_000,
   });
 
-  const notifCount =
-    (friendRequests?.incomingReqs?.length || 0) + (friendRequests?.acceptedReqs?.length || 0);
+  const allNotifIds = getNotificationIds(friendRequests);
+  // seenVersion is only used to force recompute when localStorage is updated.
+  void seenVersion;
+  const seen = readSeenSet();
+  const notifCount = allNotifIds.filter((id) => !seen.has(id)).length;
 
   // const queryClient = useQueryClient();
   // const { mutate: logoutMutation } = useMutation({

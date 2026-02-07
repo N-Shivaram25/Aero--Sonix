@@ -7,6 +7,25 @@ import { getCountryFlag, getLanguageFlag } from "../components/FriendCard";
 import { useStreamChat } from "../context/StreamChatContext";
 import { Link } from "react-router";
 
+const seenStoreKey = "aerosonix_seen_notification_ids";
+
+const writeSeenIds = (ids) => {
+  try {
+    const raw = localStorage.getItem(seenStoreKey);
+    const arr = raw ? JSON.parse(raw) : [];
+    const prev = Array.isArray(arr) ? new Set(arr.map((x) => String(x))) : new Set();
+    (ids || []).forEach((id) => prev.add(String(id)));
+    localStorage.setItem(seenStoreKey, JSON.stringify(Array.from(prev)));
+    try {
+      window.dispatchEvent(new Event("aerosonix-notifications-seen"));
+    } catch {
+      // ignore
+    }
+  } catch {
+    // ignore
+  }
+};
+
 const NotificationsPage = () => {
   const queryClient = useQueryClient();
   const { ensureUsersPresence, onlineMap } = useStreamChat();
@@ -37,6 +56,15 @@ const NotificationsPage = () => {
 
   const incomingRequests = friendRequests?.incomingReqs || [];
   const acceptedRequests = friendRequests?.acceptedReqs || [];
+
+  useEffect(() => {
+    try {
+      const ids = [...incomingRequests, ...acceptedRequests].map((x) => x?._id).filter(Boolean);
+      if (ids.length) writeSeenIds(ids);
+    } catch {
+      // ignore
+    }
+  }, [incomingRequests, acceptedRequests]);
 
   useEffect(() => {
     const ids = [
