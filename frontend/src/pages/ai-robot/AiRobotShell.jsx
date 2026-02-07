@@ -160,6 +160,9 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const [bottomVoiceOn, setBottomVoiceOn] = useState(false);
   const bottomVoiceOnRef = useRef(false);
   const [bottomTranslateEnabled, setBottomTranslateEnabled] = useState(true);
+  const [bottomSourceLanguage, setBottomSourceLanguage] = useState("Auto");
+  const [bottomTargetLanguage, setBottomTargetLanguage] = useState("Hindi");
+  const [bottomVoiceGender, setBottomVoiceGender] = useState("Male");
   const [bottomIsRecording, setBottomIsRecording] = useState(false);
   const [bottomRecorder, setBottomRecorder] = useState(null);
   const [bottomLiveTranscription, setBottomLiveTranscription] = useState("");
@@ -180,6 +183,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const bottomSpeakTokenRef = useRef(0);
   const bottomIsSpeakingRef = useRef(false);
   const bottomLastSpokenRef = useRef("");
+  const bottomPendingSpeakRef = useRef("");
 
   const bottomLastInputActivityAtRef = useRef(0);
   const bottomSentenceBoundaryTimerRef = useRef(null);
@@ -569,14 +573,25 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
   const speakBottomTranslatedTextImmediate = async (text) => {
     const cleaned = String(text || "").trim();
     if (!cleaned) return;
+
+    // Queue segments so the voice sounds continuous (call-like)
+    bottomPendingSpeakRef.current = `${String(bottomPendingSpeakRef.current || "").trim()} ${cleaned}`.trim();
+    if (bottomIsSpeakingRef.current) return;
+
     const token = ++bottomSpeakTokenRef.current;
 
     try {
       if (bottomSpeakTokenRef.current !== token) return;
-      if (bottomIsSpeakingRef.current) return;
-
       bottomIsSpeakingRef.current = true;
-      const buf = await aiRobotTts({ text: cleaned, voiceGender: translateVoiceGender });
+
+      const nextText = String(bottomPendingSpeakRef.current || "").trim();
+      if (!nextText) {
+        bottomIsSpeakingRef.current = false;
+        return;
+      }
+      bottomPendingSpeakRef.current = "";
+
+      const buf = await aiRobotTts({ text: nextText, voiceGender: bottomVoiceGender });
       if (bottomSpeakTokenRef.current !== token) return;
       if (!buf) return;
 
@@ -613,7 +628,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         });
       }
 
-      bottomLastSpokenRef.current = cleaned;
+      bottomLastSpokenRef.current = nextText;
     } catch {
       bottomIsSpeakingRef.current = false;
       // ignore
@@ -760,6 +775,11 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
       } catch {
         // ignore
       }
+      return;
+    }
+
+    if (voiceModeOnRef.current) {
+      toast.error("Turn OFF top voice to use bottom voice");
       return;
     }
 
@@ -989,8 +1009,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
         bottomIsTranslatingRef.current = true;
         const res = await aiRobotTranslate({
           text: newlyAdded,
-          targetLanguage: translateTargetLanguage,
-          sourceLanguage: translateSourceLanguage,
+          targetLanguage: bottomTargetLanguage,
+          sourceLanguage: bottomSourceLanguage,
         });
         if (bottomTranslateReqTokenRef.current !== token) return;
         const segment = String(res?.translatedText || "").trim();
@@ -1011,7 +1031,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
     }, 300);
 
     return () => clearTimeout(id);
-  }, [bottomLiveTranscription, translateTargetLanguage, translateSourceLanguage, bottomTranslateEnabled, bottomShowTranscription]);
+  }, [bottomLiveTranscription, bottomTargetLanguage, bottomSourceLanguage, bottomTranslateEnabled, bottomShowTranscription]);
 
   useEffect(() => {
     if (!bottomShowTranscription) return;
@@ -1024,7 +1044,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
 
     // Bottom mode always speaks immediately in parallel.
     speakBottomTranslatedTextImmediate(immediate);
-  }, [bottomTranslatedNewText, bottomShowTranscription, bottomTranslateEnabled, translateVoiceGender]);
+  }, [bottomTranslatedNewText, bottomShowTranscription, bottomTranslateEnabled, bottomVoiceGender]);
 
   useEffect(() => {
     return () => {
@@ -1936,10 +1956,10 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                   <button
                     type="button"
                     className={`btn btn-circle ${voiceModeOn ? "btn-error ring ring-error ring-offset-2 ring-offset-base-200" : "btn-primary"}`}
-                    disabled={isTranscribing || isResponding}
+                    disabled={isTranscribing || isResponding || bottomVoiceOn}
                     onClick={toggleVoiceMode}
                     aria-pressed={voiceModeOn}
-                    title={voiceModeOn ? "Voice OFF" : "Voice ON"}
+                    title={bottomVoiceOn ? "Bottom voice is ON" : voiceModeOn ? "Voice OFF" : "Voice ON"}
                   >
                     {voiceModeOn ? (
                       <span className="relative">
@@ -2075,25 +2095,6 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                   </div>
                 )}
 
-                {/* Chat Messages Area */}
-                <div className="min-h-[45vh] max-h-[65vh] overflow-y-auto rounded-lg border border-base-300 bg-base-100 p-3 space-y-2">
-                  {loadingConversation ? (
-                    <div className="flex justify-center py-10">
-                      <span className="loading loading-spinner loading-lg" />
-                    </div>
-                  ) : messages.length ? (
-                    messages.map((m, idx) => (
-                      <div key={`${m.role}-${idx}`} className={`chat ${m.role === "user" ? "chat-end" : "chat-start"}`}>
-                        <div className={`chat-bubble ${m.role === "user" ? "chat-bubble-primary" : ""}`}>{m.text}</div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="flex items-center justify-center h-full">
-                      <p className="text-lg opacity-40 text-center">Get your chatting Here</p>
-                    </div>
-                  )}
-                </div>
-
                 <div className="mt-3 border border-base-300 rounded-lg bg-base-200 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
@@ -2102,7 +2103,8 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                         className={`btn btn-circle ${bottomVoiceOn ? "btn-error ring ring-error ring-offset-2 ring-offset-base-200" : "btn-primary"}`}
                         onClick={toggleBottomVoice}
                         aria-pressed={bottomVoiceOn}
-                        title={bottomVoiceOn ? "Bottom Voice OFF" : "Bottom Voice ON"}
+                        disabled={voiceModeOn}
+                        title={voiceModeOn ? "Top voice is ON" : bottomVoiceOn ? "Bottom Voice OFF" : "Bottom Voice ON"}
                       >
                         {bottomVoiceOn ? (
                           <span className="relative">
@@ -2128,17 +2130,87 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                       )}
                     </div>
 
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-ghost"
-                      onClick={resetBottomLiveTexts}
-                      title="Reset"
-                    >
-                      <RotateCcw className="size-4" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${bottomTranslateEnabled ? "btn-error" : "btn-outline"}`}
+                        onClick={() => setBottomTranslateEnabled((v) => !v)}
+                      >
+                        Translate
+                      </button>
+
+                      <div className="dropdown">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline"
+                          disabled={!bottomTranslateEnabled}
+                          tabIndex={0}
+                        >
+                          From: {bottomSourceLanguage}
+                        </button>
+                        <ul tabIndex={0} className="dropdown-content menu bg-base-100 rounded-box z-[1] w-52 p-2 shadow">
+                          {TRANSLATE_LANGUAGE_OPTIONS.map((lang) => (
+                            <li key={`b-tr-${lang}`}>
+                              <button type="button" onClick={() => setBottomSourceLanguage(lang)}>
+                                {lang}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      <div className="dropdown">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline"
+                          disabled={!bottomTranslateEnabled}
+                          tabIndex={0}
+                        >
+                          To: {bottomTargetLanguage}
+                        </button>
+                        <ul tabIndex={0} className="dropdown-content menu bg-base-100 rounded-box z-[1] w-52 p-2 shadow">
+                          {TRANSLATE_LANGUAGE_OPTIONS.filter((l) => l !== "Auto").map((lang) => (
+                            <li key={`b-tr-to-${lang}`}>
+                              <button type="button" onClick={() => setBottomTargetLanguage(lang)}>
+                                {lang}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      <div className="dropdown">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline"
+                          disabled={!bottomTranslateEnabled}
+                          tabIndex={0}
+                        >
+                          Voice: {bottomVoiceGender}
+                        </button>
+                        <ul tabIndex={0} className="dropdown-content menu bg-base-100 rounded-box z-[1] w-40 p-2 shadow">
+                          {["Male", "Female"].map((g) => (
+                            <li key={`b-voice-${g}`}>
+                              <button type="button" onClick={() => setBottomVoiceGender(g)}>
+                                {g}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost"
+                        onClick={resetBottomLiveTexts}
+                        title="Reset"
+                      >
+                        <RotateCcw className="size-4" />
+                      </button>
+                    </div>
                   </div>
 
-                  {bottomShowTranscription && bottomLiveTranscription ? (
+                  {bottomShowTranscription ? (
                     <div className="mt-3">
                       <p className="text-xs opacity-50 mb-1">You said:</p>
                       <div className="text-sm opacity-80 whitespace-pre-wrap break-words">
@@ -2151,7 +2223,7 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                       {bottomTranslateEnabled ? (
                         <div className="mt-3">
                           <p className="text-xs opacity-50 mb-1">
-                            {translateSourceLanguage} → {translateTargetLanguage}:
+                            {bottomSourceLanguage} → {bottomTargetLanguage}:
                           </p>
                           <div className="text-sm opacity-90 whitespace-pre-wrap break-words">
                             <span>{bottomTranslatedBaseText}</span>
@@ -2165,6 +2237,25 @@ const AiRobotShell = ({ moduleKey, title, subtitle }) => {
                       ) : null}
                     </div>
                   ) : null}
+                </div>
+
+                {/* Chat Messages Area */}
+                <div className="min-h-[45vh] max-h-[65vh] overflow-y-auto rounded-lg border border-base-300 bg-base-100 p-3 space-y-2">
+                  {loadingConversation ? (
+                    <div className="flex justify-center py-10">
+                      <span className="loading loading-spinner loading-lg" />
+                    </div>
+                  ) : messages.length ? (
+                    messages.map((m, idx) => (
+                      <div key={`${m.role}-${idx}`} className={`chat ${m.role === "user" ? "chat-end" : "chat-start"}`}>
+                        <div className={`chat-bubble ${m.role === "user" ? "chat-bubble-primary" : ""}`}>{m.text}</div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="flex items-center justify-center h-full">
+                      <p className="text-lg opacity-40 text-center">Get your chatting Here</p>
+                    </div>
+                  )}
                 </div>
 
                 <audio ref={audioRef} />
