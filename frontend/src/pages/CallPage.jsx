@@ -322,9 +322,11 @@ const CaptionControls = ({
       try {
         let stream;
         const audioTrack = call?.state?.localParticipant?.publishedTracks?.audio?.track;
+        console.log("[Captions] Stream audio track:", !!audioTrack);
         if (audioTrack) {
           stream = new MediaStream([audioTrack]);
         } else {
+          toast.error("Captions: Stream mic track not found, using device mic");
           stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         }
         if (stopped) return;
@@ -332,6 +334,19 @@ const CaptionControls = ({
 
         const ws = new WebSocket(wsUrl);
         socketRef.current = ws;
+
+        ws.onopen = () => {
+          console.log("[Captions] WS open");
+        };
+
+        ws.onclose = (e) => {
+          console.log("[Captions] WS close", e?.code, e?.reason);
+        };
+
+        ws.onerror = (e) => {
+          console.log("[Captions] WS error", e);
+          toast.error("Captions: WebSocket connection failed");
+        };
 
         ws.onmessage = (evt) => {
           if (stopped) return;
@@ -363,13 +378,15 @@ const CaptionControls = ({
           }
         };
 
-        ws.onerror = () => {
-        };
-
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (!AudioCtx) return;
         const audioCtx = new AudioCtx({ sampleRate: 16000, latencyHint: "interactive" });
         audioCtxRef.current = audioCtx;
+
+        try {
+          await audioCtx.resume();
+        } catch {
+        }
 
         const source = audioCtx.createMediaStreamSource(stream);
         const processor = audioCtx.createScriptProcessor(4096, 1, 1);
@@ -391,6 +408,7 @@ const CaptionControls = ({
           }
         };
       } catch {
+        toast.error("Captions: could not start audio capture");
       }
     };
 
