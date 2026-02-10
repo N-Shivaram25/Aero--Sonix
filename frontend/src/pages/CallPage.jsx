@@ -193,7 +193,7 @@ const CaptionControls = ({
   const inFlightRef = useRef(new Map());
 
   const pickMimeType = () => {
-    const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+    const candidates = ["audio/ogg;codecs=opus", "audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
     for (const c of candidates) {
       try {
         if (MediaRecorder.isTypeSupported(c)) return c;
@@ -207,95 +207,150 @@ const CaptionControls = ({
     if (!captionsEnabled) return;
 
     let stopped = false;
-    const recorders = new Map();
+    const sessions = new Map();
 
-    let localStream;
-    let localRecorder;
+    const startSession = async ({
+      sessionId,
+      stream,
+      speakerName,
+      stopTracksOnCleanup,
+    }) => {
+      if (!sessionId || !stream) return;
+      if (sessions.has(sessionId)) return;
 
-    const startLocal = async () => {
-      try {
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const state = {
+        sessionId,
+        stream,
+        speakerName,
+        stopTracksOnCleanup,
+        chunks: [],
+        lastVoiceAt: 0,
+        recorder: null,
+        interval: null,
+        audioCtx: null,
+        analyser: null,
+        rafId: null,
+      };
+
+      const key = sessionId;
+      inFlightRef.current.set(key, false);
+      sessions.set(sessionId, state);
+
+      const startVoiceDetector = () => {
+        try {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (!AudioCtx) return;
+          const audioCtx = new AudioCtx();
+          const source = audioCtx.createMediaStreamSource(stream);
+          const analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 1024;
+          source.connect(analyser);
+
+          const data = new Uint8Array(analyser.frequencyBinCount);
+
+          state.audioCtx = audioCtx;
+          state.analyser = analyser;
+
+          const tick = () => {
+            if (stopped) return;
+            try {
+              analyser.getByteFrequencyData(data);
+              let sum = 0;
+              for (let i = 0; i < data.length; i++) sum += data[i];
+              const avg = sum / (data.length || 1);
+
+              // Heuristic threshold; tuned to catch speech but ignore silence.
+              if (avg > 12) state.lastVoiceAt = Date.now();
+            } catch {
+            }
+            state.rafId = requestAnimationFrame(tick);
+          };
+
+          state.rafId = requestAnimationFrame(tick);
+        } catch {
+        }
+      };
+
+      const flushIfReady = async () => {
         if (stopped) return;
+        if (inFlightRef.current.get(key)) return;
+        if (!state.chunks.length) return;
+        if (!state.lastVoiceAt) return;
 
-        const mimeType = pickMimeType();
-        localRecorder = new MediaRecorder(localStream, mimeType ? { mimeType } : undefined);
+        const silentForMs = Date.now() - state.lastVoiceAt;
+        if (silentForMs < 3000) return;
 
-        localRecorder.ondataavailable = async (evt) => {
-          if (stopped) return;
-          if (!evt?.data || evt.data.size === 0) return;
+        const blob = new Blob(state.chunks, { type: state.recorder?.mimeType || "audio/webm" });
+        state.chunks = [];
 
-          const key = "local";
-          if (inFlightRef.current.get(key)) return;
-          inFlightRef.current.set(key, true);
+        inFlightRef.current.set(key, true);
+        try {
+          const sttRes = await callGoogleStt({ audioBlob: blob, language: spokenLanguage });
+          const text = sttRes?.text || "";
+          if (!text.trim()) return;
 
-          try {
-            const sttRes = await callGoogleStt({ audioBlob: evt.data, language: spokenLanguage });
-            const text = sttRes?.text || "";
-            if (!text.trim()) return;
-            pushCaption({
-              id: `${Date.now()}-local`,
-              speaker: authUser?.fullName || "You",
-              text,
-              ts: Date.now(),
-            });
-          } catch {
-          } finally {
-            inFlightRef.current.set(key, false);
-          }
-        };
-
-        localRecorder.start(1200);
-      } catch {
-      }
-    };
-
-    const startForParticipant = async (p) => {
-      if (!p) return;
-      if (!hasAudio(p)) return;
-      if (!p.sessionId) return;
-      if (recorders.has(p.sessionId)) return;
-
-      const stream = p.audioStream;
-      if (!stream) return;
+          pushCaption({
+            id: `${Date.now()}-${key}`,
+            speaker: state.speakerName || "",
+            text,
+            ts: Date.now(),
+          });
+        } catch {
+        } finally {
+          inFlightRef.current.set(key, false);
+          // reset lastVoiceAt so we don't re-flush immediately on long silences
+          state.lastVoiceAt = 0;
+        }
+      };
 
       try {
         const mimeType = pickMimeType();
         const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-        recorders.set(p.sessionId, recorder);
-        inFlightRef.current.set(p.sessionId, false);
+        state.recorder = recorder;
 
-        recorder.ondataavailable = async (evt) => {
+        recorder.ondataavailable = (evt) => {
           if (stopped) return;
           if (!evt?.data || evt.data.size === 0) return;
-          if (inFlightRef.current.get(p.sessionId)) return;
-          inFlightRef.current.set(p.sessionId, true);
-
-          try {
-            const sttRes = await callGoogleStt({ audioBlob: evt.data, language: spokenLanguage });
-            const text = sttRes?.text || "";
-            if (!text.trim()) return;
-
-            pushCaption({
-              id: `${Date.now()}-${p.sessionId}`,
-              speaker: p.name || p.userId || "",
-              text,
-              ts: Date.now(),
-            });
-          } catch {
-          } finally {
-            inFlightRef.current.set(p.sessionId, false);
-          }
+          state.chunks.push(evt.data);
         };
 
-        recorder.start(1200);
+        startVoiceDetector();
+
+        // capture frequent small chunks; we only transcribe on silence
+        recorder.start(500);
+
+        state.interval = setInterval(() => {
+          flushIfReady();
+        }, 250);
       } catch {
+        sessions.delete(sessionId);
+        inFlightRef.current.delete(key);
       }
     };
 
     const boot = async () => {
-      await startLocal();
+      try {
+        const localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        await startSession({
+          sessionId: "local",
+          stream: localStream,
+          speakerName: authUser?.fullName || "You",
+          stopTracksOnCleanup: true,
+        });
+      } catch {
+      }
+
       for (const p of participants || []) {
-        await startForParticipant(p);
+        if (!p) continue;
+        if (!hasAudio(p)) continue;
+        if (!p.sessionId) continue;
+        if (!p.audioStream) continue;
+        await startSession({
+          sessionId: p.sessionId,
+          stream: p.audioStream,
+          speakerName: p.name || p.userId || "",
+          stopTracksOnCleanup: false,
+        });
       }
     };
 
@@ -303,24 +358,37 @@ const CaptionControls = ({
 
     return () => {
       stopped = true;
-      for (const rec of recorders.values()) {
+
+      for (const s of sessions.values()) {
         try {
-          rec.stop();
+          if (s.interval) clearInterval(s.interval);
         } catch {
+        }
+
+        try {
+          s.recorder?.stop?.();
+        } catch {
+        }
+
+        try {
+          if (s.rafId) cancelAnimationFrame(s.rafId);
+        } catch {
+        }
+
+        try {
+          s.audioCtx?.close?.();
+        } catch {
+        }
+
+        if (s.stopTracksOnCleanup) {
+          try {
+            for (const t of s.stream?.getTracks?.() || []) t.stop();
+          } catch {
+          }
         }
       }
 
-      try {
-        localRecorder?.stop();
-      } catch {
-      }
-
-      try {
-        for (const t of localStream?.getTracks?.() || []) t.stop();
-      } catch {
-      }
-
-      recorders.clear();
+      sessions.clear();
       inFlightRef.current.clear();
     };
   }, [authUser?.fullName, captionsEnabled, participants, pushCaption, spokenLanguage]);

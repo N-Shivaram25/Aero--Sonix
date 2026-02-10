@@ -73,7 +73,7 @@ export async function googleStt(req, res) {
           languageCode,
           encoding,
           enableAutomaticPunctuation: true,
-          model: "latest_short",
+          model: "latest_long",
         },
         audio: { content },
       }),
