@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
-import { callGoogleStt, getStreamToken } from "../lib/api";
+import { callDeepgramStt, getStreamToken } from "../lib/api";
 import { ArrowLeftIcon } from "lucide-react";
 import { LANGUAGES } from "../constants";
 
@@ -285,7 +285,7 @@ const CaptionControls = ({
 
         inFlightRef.current.set(key, true);
         try {
-          const sttRes = await callGoogleStt({ audioBlob: blob, language: spokenLanguage });
+          const sttRes = await callDeepgramStt({ audioBlob: blob, language: spokenLanguage });
           const text = sttRes?.text || "";
           if (!text.trim()) return;
 

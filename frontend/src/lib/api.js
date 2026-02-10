@@ -181,6 +181,16 @@ export async function callGoogleStt({ audioBlob, language }) {
   return response.data;
 }
 
+export async function callDeepgramStt({ audioBlob, language }) {
+  const form = new FormData();
+  form.append("audio", audioBlob);
+  if (language) form.append("language", language);
+  const response = await axiosInstance.post("/call/deepgram-stt", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return response.data;
+}
+
 export async function callTranslate({ text, targetLanguage, speakerUserId }) {
   const response = await axiosInstance.post("/call/translate", { text, targetLanguage, speakerUserId });
   return response.data;

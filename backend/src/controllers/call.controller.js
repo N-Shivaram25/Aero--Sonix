@@ -2,7 +2,12 @@ import User from "../models/User.js";
 import { getElevenLabsClient } from "../lib/elevenlabsClient.js";
 import { getOpenAIClient } from "../lib/openaiClient.js";
 import { toFile } from "openai/uploads";
-import { toElevenLabsLanguageCode, toGoogleSttLanguageCode, toWhisperLanguageCode } from "../lib/languageCodes.js";
+import {
+  toDeepgramLanguageCode,
+  toElevenLabsLanguageCode,
+  toGoogleSttLanguageCode,
+  toWhisperLanguageCode,
+} from "../lib/languageCodes.js";
 
 const getFallbackVoiceId = (gender) => {
   const g = String(gender || "").toLowerCase();
@@ -38,6 +43,54 @@ export async function getVoiceProfile(req, res) {
     });
   } catch (error) {
     console.error("Error in getVoiceProfile controller", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+}
+
+export async function deepgramStt(req, res) {
+  try {
+    const file = req.file;
+    if (!file?.buffer) {
+      return res.status(400).json({ message: "Audio file is required" });
+    }
+
+    const apiKey = process.env.DEEPGRAM_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ message: "DEEPGRAM_API_KEY is not set" });
+    }
+
+    const language = toDeepgramLanguageCode(req.body?.language);
+    const mimetype = String(file.mimetype || "application/octet-stream");
+
+    const url = new URL("https://api.deepgram.com/v1/listen");
+    url.searchParams.set("model", "nova-2");
+    url.searchParams.set("smart_format", "true");
+    url.searchParams.set("punctuate", "true");
+    if (language) url.searchParams.set("language", language);
+
+    const resp = await fetch(url.toString(), {
+      method: "POST",
+      headers: {
+        Authorization: `Token ${apiKey}`,
+        "Content-Type": mimetype,
+      },
+      body: file.buffer,
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const msg = data?.error || data?.message || "Deepgram STT request failed";
+      return res.status(500).json({ message: msg });
+    }
+
+    const text =
+      data?.results?.channels?.[0]?.alternatives?.[0]?.transcript ||
+      data?.results?.channels?.[0]?.alternatives?.[0]?.paragraphs?.transcript ||
+      "";
+
+    return res.status(200).json({ success: true, text: String(text || "").trim() });
+  } catch (error) {
+    console.error("Error in deepgramStt controller", error);
     return res.status(500).json({ message: "Internal Server Error" });
   }
 }
