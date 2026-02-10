@@ -1,7 +1,8 @@
 import User from "../models/User.js";
 import { getElevenLabsClient } from "../lib/elevenlabsClient.js";
 import { getOpenAIClient } from "../lib/openaiClient.js";
-import { toElevenLabsLanguageCode } from "../lib/languageCodes.js";
+import { toFile } from "openai/uploads";
+import { toElevenLabsLanguageCode, toWhisperLanguageCode } from "../lib/languageCodes.js";
 
 const getFallbackVoiceId = (gender) => {
   const g = String(gender || "").toLowerCase();
@@ -153,6 +154,44 @@ export async function tts(req, res) {
     return res.status(200).send(buffer);
   } catch (error) {
     console.error("Error in tts controller", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+}
+
+export async function whisperStt(req, res) {
+  try {
+    const file = req.file;
+    if (!file?.buffer) {
+      return res.status(400).json({ message: "Audio file is required" });
+    }
+
+    const openai = getOpenAIClient();
+
+    const language = toWhisperLanguageCode(req.body?.language);
+    const translate = String(req.body?.translate || "").toLowerCase() === "true";
+    const audioFile = await toFile(file.buffer, file.originalname || "audio.webm", {
+      type: file.mimetype || "audio/webm",
+    });
+
+    let text = "";
+    if (translate) {
+      const translation = await openai.audio.translations.create({
+        file: audioFile,
+        model: "whisper-1",
+      });
+      text = translation?.text || "";
+    } else {
+      const transcription = await openai.audio.transcriptions.create({
+        file: audioFile,
+        model: "whisper-1",
+        ...(language ? { language } : {}),
+      });
+      text = transcription?.text || "";
+    }
+
+    return res.status(200).json({ success: true, text });
+  } catch (error) {
+    console.error("Error in whisperStt controller", error);
     return res.status(500).json({ message: "Internal Server Error" });
   }
 }

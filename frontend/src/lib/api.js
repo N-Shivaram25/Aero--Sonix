@@ -160,6 +160,17 @@ export async function callStt({ audioBlob, speakerUserId }) {
   return response.data;
 }
 
+export async function callWhisperStt({ audioBlob, language, translate }) {
+  const form = new FormData();
+  form.append("audio", audioBlob);
+  if (language) form.append("language", language);
+  if (translate) form.append("translate", "true");
+  const response = await axiosInstance.post("/call/whisper-stt", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return response.data;
+}
+
 export async function callTranslate({ text, targetLanguage, speakerUserId }) {
   const response = await axiosInstance.post("/call/translate", { text, targetLanguage, speakerUserId });
   return response.data;

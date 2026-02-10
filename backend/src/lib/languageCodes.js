@@ -22,3 +22,33 @@ export const toElevenLabsLanguageCode = (nativeLanguage) => {
 
   return map[key] || null;
 };
+
+export const toWhisperLanguageCode = (language) => {
+  if (!language || typeof language !== "string") return null;
+  const key = language.trim().toLowerCase();
+
+  const map = {
+    english: "en",
+    hindi: "hi",
+    telugu: "te",
+    spanish: "es",
+    french: "fr",
+    german: "de",
+    arabic: "ar",
+    portuguese: "pt",
+    russian: "ru",
+    italian: "it",
+    japanese: "ja",
+    korean: "ko",
+    mandarin: "zh",
+    turkish: "tr",
+    dutch: "nl",
+    vietnamese: "vi",
+    swedish: "sv",
+    polish: "pl",
+    greek: "el",
+    hebrew: "he",
+  };
+
+  return map[key] || null;
+};

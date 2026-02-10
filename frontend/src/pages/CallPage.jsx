@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
-import { callStt, callTranslate, callTts, getMyVoiceProfile, getStreamToken } from "../lib/api";
+import { callWhisperStt, getStreamToken } from "../lib/api";
 import { ArrowLeftIcon } from "lucide-react";
 import { LANGUAGES } from "../constants";
 
@@ -140,6 +140,11 @@ const CallContent = () => {
 
   const navigate = useNavigate();
 
+  const [captionsEnabled, setCaptionsEnabled] = useState(false);
+  const [spokenLanguage, setSpokenLanguage] = useState("english");
+  const [captionText, setCaptionText] = useState("");
+  const [captionSpeaker, setCaptionSpeaker] = useState("");
+
   useEffect(() => {
     if (callingState === CallingState.LEFT) {
       navigate("/");
@@ -150,88 +155,48 @@ const CallContent = () => {
 
   return (
     <StreamTheme>
-      <TranslationControls />
-      <SpeakerLayout />
-      <CallControls />
+      <CaptionControls
+        captionsEnabled={captionsEnabled}
+        setCaptionsEnabled={setCaptionsEnabled}
+        spokenLanguage={spokenLanguage}
+        setSpokenLanguage={setSpokenLanguage}
+        setCaptionText={setCaptionText}
+        setCaptionSpeaker={setCaptionSpeaker}
+      />
+      <div className="w-full h-[100dvh] flex flex-col">
+        <div className="flex-1 min-h-0">
+          <SpeakerLayout />
+        </div>
+        {captionsEnabled ? <CaptionBar text={captionText} speaker={captionSpeaker} /> : null}
+        <CallControls />
+      </div>
     </StreamTheme>
   );
 };
 
-const TranslationControls = () => {
-  const navigate = useNavigate();
-  const { authUser } = useAuthUser();
-  const { useParticipants, useSpeakerState } = useCallStateHooks();
+const CaptionControls = ({
+  captionsEnabled,
+  setCaptionsEnabled,
+  spokenLanguage,
+  setSpokenLanguage,
+  setCaptionText,
+  setCaptionSpeaker,
+}) => {
+  const { useParticipants } = useCallStateHooks();
   const participants = useParticipants();
-  const { speaker } = useSpeakerState();
 
-  const mutedSessionIdsRef = useRef(new Set());
-
-  const [enabled, setEnabled] = useState(false);
-  const [targetLanguage, setTargetLanguage] = useState("english");
+  const inFlightRef = useRef(new Map());
 
   useEffect(() => {
-    // warm auth + avoid first-call 401 surprises
-    if (!authUser) return;
-    getMyVoiceProfile().catch(() => {});
-  }, [authUser]);
-
-  useEffect(() => {
-    if (!speaker) return;
-
-    if (!enabled) {
-      if (mutedSessionIdsRef.current.size === 0) return;
-      for (const sessionId of mutedSessionIdsRef.current) {
-        try {
-          speaker.setParticipantVolume(sessionId, undefined);
-        } catch {
-          // ignore
-        }
-      }
-      mutedSessionIdsRef.current.clear();
-      return;
-    }
-
-    // Mute other participants to prevent echo / double audio.
-    for (const p of participants || []) {
-      if (!p || p.isLocalParticipant) continue;
-      if (!p.sessionId) continue;
-      if (mutedSessionIdsRef.current.has(p.sessionId)) continue;
-
-      try {
-        speaker.setParticipantVolume(p.sessionId, 0);
-        mutedSessionIdsRef.current.add(p.sessionId);
-      } catch {
-        // ignore
-      }
-    }
-  }, [enabled, participants, speaker]);
-
-  useEffect(() => {
-    return () => {
-      if (!speaker) return;
-      if (mutedSessionIdsRef.current.size === 0) return;
-      for (const sessionId of mutedSessionIdsRef.current) {
-        try {
-          speaker.setParticipantVolume(sessionId, undefined);
-        } catch {
-          // ignore
-        }
-      }
-      mutedSessionIdsRef.current.clear();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!enabled) return;
+    if (!captionsEnabled) return;
 
     let stopped = false;
     const recorders = new Map();
-    const inFlight = new Map();
 
     const startForParticipant = async (p) => {
-      if (!p || p.isLocalParticipant) return;
+      if (!p) return;
       if (!hasAudio(p)) return;
+      if (!p.sessionId) return;
       if (recorders.has(p.sessionId)) return;
 
       const stream = p.audioStream;
@@ -240,52 +205,33 @@ const TranslationControls = () => {
       try {
         const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
         recorders.set(p.sessionId, recorder);
-        inFlight.set(p.sessionId, false);
+        inFlightRef.current.set(p.sessionId, false);
 
         recorder.ondataavailable = async (evt) => {
           if (stopped) return;
           if (!evt?.data || evt.data.size === 0) return;
-          if (inFlight.get(p.sessionId)) return;
-          inFlight.set(p.sessionId, true);
+          if (inFlightRef.current.get(p.sessionId)) return;
+          inFlightRef.current.set(p.sessionId, true);
 
           try {
-            const sttRes = await callStt({ audioBlob: evt.data, speakerUserId: p.userId });
+            const sttRes = await callWhisperStt({
+              audioBlob: evt.data,
+              language: spokenLanguage,
+              translate: true,
+            });
             const text = sttRes?.text || "";
             if (!text.trim()) return;
 
-            const trRes = await callTranslate({
-              text,
-              targetLanguage,
-              speakerUserId: p.userId,
-            });
-            const translatedText = trRes?.translatedText || "";
-            if (!translatedText.trim()) return;
-
-            let ttsRes;
-            try {
-              ttsRes = await callTts({ text: translatedText, speakerUserId: p.userId });
-            } catch (err) {
-              return;
-            }
-
-            const buf = ttsRes?.data;
-            if (!buf) return;
-
-            const blob = new Blob([buf], { type: "audio/mpeg" });
-            const url = URL.createObjectURL(blob);
-            const audio = new Audio(url);
-            audio.onended = () => URL.revokeObjectURL(url);
-            await audio.play();
+            setCaptionText(text);
+            setCaptionSpeaker(p.name || p.userId || "");
           } catch {
-            // ignore chunk failures to keep realtime flowing
           } finally {
-            inFlight.set(p.sessionId, false);
+            inFlightRef.current.set(p.sessionId, false);
           }
         };
 
         recorder.start(1200);
       } catch {
-        // ignore
       }
     };
 
@@ -303,39 +249,59 @@ const TranslationControls = () => {
         try {
           rec.stop();
         } catch {
-          // ignore
         }
       }
       recorders.clear();
-      inFlight.clear();
+      inFlightRef.current.clear();
     };
-  }, [enabled, participants, targetLanguage]);
-
-  const toggle = () => {
-    setEnabled((v) => !v);
-  };
+  }, [captionsEnabled, participants, spokenLanguage, setCaptionSpeaker, setCaptionText]);
 
   return (
     <div className="absolute top-4 right-4 z-20 flex flex-col gap-2 bg-base-100/80 backdrop-blur rounded-xl border border-base-300 p-3">
-      <div className="text-sm font-semibold">Live Translation</div>
+      <div className="text-sm font-semibold">Translation</div>
       <div className="flex items-center gap-2">
-        <span className="text-xs opacity-70">Target</span>
+        <span className="text-xs opacity-70">Language</span>
         <select
           className="select select-bordered select-sm"
-          value={targetLanguage}
-          onChange={(e) => setTargetLanguage(e.target.value)}
-          disabled={!enabled}
+          value={spokenLanguage}
+          onChange={(e) => setSpokenLanguage(e.target.value)}
         >
           {LANGUAGES.map((lang) => (
-            <option key={`target-${lang}`} value={lang.toLowerCase()}>
+            <option key={`spoken-${lang}`} value={lang.toLowerCase()}>
               {lang}
             </option>
           ))}
         </select>
       </div>
-      <button type="button" className={`btn btn-sm ${enabled ? "btn-error" : "btn-success"}`} onClick={toggle}>
-        {enabled ? "Disable Translation" : "Enable Translation"}
+      <button
+        type="button"
+        className={`btn btn-sm ${captionsEnabled ? "btn-error" : "btn-success"}`}
+        onClick={() => setCaptionsEnabled((v) => !v)}
+      >
+        {captionsEnabled ? "Translation OFF" : "Translation ON"}
       </button>
+    </div>
+  );
+};
+
+const CaptionBar = ({ text, speaker }) => {
+  const value = String(text || "").trim();
+  const who = String(speaker || "").trim();
+
+  return (
+    <div className="w-full px-4 pb-4">
+      <div className="w-full rounded-xl border border-base-300 bg-base-100/90 backdrop-blur px-4 py-3 min-h-[56px] flex items-center">
+        <div className="text-sm w-full truncate">
+          {value ? (
+            <span>
+              {who ? <span className="font-semibold mr-2">{who}:</span> : null}
+              <span>{value}</span>
+            </span>
+          ) : (
+            <span className="opacity-60">Listening…</span>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
