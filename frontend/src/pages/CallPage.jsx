@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
-import { callWhisperStt, getStreamToken } from "../lib/api";
+import { callGoogleStt, getStreamToken } from "../lib/api";
 import { ArrowLeftIcon } from "lucide-react";
 import { LANGUAGES } from "../constants";
 
@@ -229,11 +229,7 @@ const CaptionControls = ({
           inFlightRef.current.set(key, true);
 
           try {
-            const sttRes = await callWhisperStt({
-              audioBlob: evt.data,
-              language: spokenLanguage,
-              translate: false,
-            });
+            const sttRes = await callGoogleStt({ audioBlob: evt.data, language: spokenLanguage });
             const text = sttRes?.text || "";
             if (!text.trim()) return;
             pushCaption({
@@ -275,11 +271,7 @@ const CaptionControls = ({
           inFlightRef.current.set(p.sessionId, true);
 
           try {
-            const sttRes = await callWhisperStt({
-              audioBlob: evt.data,
-              language: spokenLanguage,
-              translate: false,
-            });
+            const sttRes = await callGoogleStt({ audioBlob: evt.data, language: spokenLanguage });
             const text = sttRes?.text || "";
             if (!text.trim()) return;
 
@@ -335,7 +327,7 @@ const CaptionControls = ({
 
   return (
     <div className="absolute top-4 right-4 z-20 flex flex-col gap-2 bg-base-100/80 backdrop-blur rounded-xl border border-base-300 p-3">
-      <div className="text-sm font-semibold">Translation</div>
+      <div className="text-sm font-semibold">Captions ON/OFF (STT)</div>
       <div className="flex items-center gap-2">
         <span className="text-xs opacity-70">Language</span>
         <select
@@ -368,7 +360,7 @@ const CaptionBar = ({
 
   return (
     <div className="w-full px-4 pb-4">
-      <div className="card bg-base-200 border border-base-300">
+      <div className="card bg-base-100 border border-base-300">
         <div className="card-body p-3">
           <div className="text-xs opacity-70 mb-1">Captions</div>
           <div className="text-sm space-y-1">
