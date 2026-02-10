@@ -15,6 +15,7 @@ import {
   StreamTheme,
   CallingState,
   useCallStateHooks,
+  useCall,
   hasAudio,
 } from "@stream-io/video-react-sdk";
 
@@ -189,6 +190,7 @@ const CaptionControls = ({
 }) => {
   const { useParticipants } = useCallStateHooks();
   const participants = useParticipants();
+  const call = useCall();
 
   const socketRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -318,7 +320,13 @@ const CaptionControls = ({
 
     const start = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        let stream;
+        const audioTrack = call?.state?.localParticipant?.publishedTracks?.audio?.track;
+        if (audioTrack) {
+          stream = new MediaStream([audioTrack]);
+        } else {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
         if (stopped) return;
         micStreamRef.current = stream;
 
@@ -360,7 +368,7 @@ const CaptionControls = ({
 
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (!AudioCtx) return;
-        const audioCtx = new AudioCtx();
+        const audioCtx = new AudioCtx({ sampleRate: 16000, latencyHint: "interactive" });
         audioCtxRef.current = audioCtx;
 
         const source = audioCtx.createMediaStreamSource(stream);
@@ -407,18 +415,24 @@ const CaptionControls = ({
       }
 
       try {
+        if (socketRef.current?.readyState === WebSocket.OPEN) {
+          socketRef.current.send(JSON.stringify({ type: "CloseStream" }));
+        }
         socketRef.current?.close?.();
       } catch {
       }
 
       try {
-        for (const t of micStreamRef.current?.getTracks?.() || []) t.stop();
+        const usedStreamTrack = call?.state?.localParticipant?.publishedTracks?.audio?.track;
+        if (!usedStreamTrack) {
+          for (const t of micStreamRef.current?.getTracks?.() || []) t.stop();
+        }
       } catch {
       }
 
       interimRef.current = "";
     };
-  }, [authUser?.fullName, captionsEnabled, pushCaption, setCaptionsEnabled, spokenLanguage]);
+  }, [authUser?.fullName, call, captionsEnabled, pushCaption, setCaptionsEnabled, spokenLanguage]);
 
   return (
     <div className="absolute top-4 right-4 z-20 flex flex-col gap-2 bg-base-100/80 backdrop-blur rounded-xl border border-base-300 p-3">
