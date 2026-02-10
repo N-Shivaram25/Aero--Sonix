@@ -4,6 +4,9 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import path from "path";
 import fs from "fs";
+import http from "http";
+import jwt from "jsonwebtoken";
+import { WebSocketServer, WebSocket } from "ws";
 
 import authRoutes from "./routes/auth.route.js";
 import userRoutes from "./routes/user.route.js";
@@ -14,6 +17,7 @@ import callRoutes from "./routes/call.route.js";
 import aiRobotRoutes from "./routes/aiRobot.route.js";
 
 import { connectDB } from "./lib/db.js";
+import User from "./models/User.js";
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -98,6 +102,109 @@ app.get("/favicon.png", (req, res) => {
   res.status(204).end();
 });
 
+const getUserFromToken = async (token) => {
+  if (!token) return null;
+  if (!process.env.JWT_SECRET_KEY) return null;
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
+    const user = await User.findById(decoded.userId).select("-password");
+    return user || null;
+  } catch {
+    return null;
+  }
+};
+
+const setupDeepgramWsProxy = (server) => {
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on("upgrade", async (req, socket, head) => {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      if (url.pathname !== "/ws/deepgram") return;
+
+      const token = url.searchParams.get("token") || "";
+      const user = await getUserFromToken(token);
+      if (!user) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        ws.user = user;
+        ws.deepgramUrl = url;
+        wss.emit("connection", ws, req);
+      });
+    } catch {
+      socket.destroy();
+    }
+  });
+
+  wss.on("connection", async (clientWs) => {
+    const apiKey = process.env.DEEPGRAM_API_KEY;
+    if (!apiKey) {
+      try {
+        clientWs.send(JSON.stringify({ type: "error", message: "DEEPGRAM_API_KEY is not set" }));
+      } catch {
+      }
+      try {
+        clientWs.close();
+      } catch {
+      }
+      return;
+    }
+
+    const url = clientWs.deepgramUrl;
+    const language = (url?.searchParams?.get("language") || "en").trim();
+
+    const dgUrl =
+      `wss://api.deepgram.com/v1/listen?model=nova-2&punctuate=true&smart_format=true` +
+      `&interim_results=true&language=${encodeURIComponent(language)}` +
+      `&encoding=linear16&sample_rate=16000&channels=1`;
+
+    const dgWs = new WebSocket(dgUrl, ["token", apiKey]);
+
+    let closed = false;
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      try {
+        dgWs.close();
+      } catch {
+      }
+      try {
+        clientWs.close();
+      } catch {
+      }
+    };
+
+    dgWs.on("message", (data) => {
+      if (closed) return;
+      try {
+        clientWs.send(data);
+      } catch {
+        cleanup();
+      }
+    });
+
+    dgWs.on("close", () => cleanup());
+    dgWs.on("error", () => cleanup());
+
+    clientWs.on("message", (chunk) => {
+      if (closed) return;
+      if (dgWs.readyState !== WebSocket.OPEN) return;
+      try {
+        dgWs.send(chunk);
+      } catch {
+        cleanup();
+      }
+    });
+
+    clientWs.on("close", () => cleanup());
+    clientWs.on("error", () => cleanup());
+  });
+};
+
 if (process.env.NODE_ENV === "production") {
   const distDir = path.join(__dirname, "../frontend/dist");
   const indexHtml = path.join(distDir, "index.html");
@@ -118,7 +225,9 @@ const __filename = fileURLToPath(import.meta.url);
 
 // If the file is executed directly (node src/server.js, nodemon, etc.) start the server.
 if (process.argv[1] === __filename) {
-  app.listen(PORT, () => {
+  const server = http.createServer(app);
+  setupDeepgramWsProxy(server);
+  server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
   });
   connectDB().catch((err) => console.log("DB connection failed", err));

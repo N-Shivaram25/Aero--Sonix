@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
-import { callDeepgramStt, getStreamToken } from "../lib/api";
+import { getStreamToken } from "../lib/api";
 import { ArrowLeftIcon } from "lucide-react";
 import { LANGUAGES } from "../constants";
 
@@ -190,208 +190,235 @@ const CaptionControls = ({
   const { useParticipants } = useCallStateHooks();
   const participants = useParticipants();
 
-  const inFlightRef = useRef(new Map());
+  const socketRef = useRef(null);
+  const audioCtxRef = useRef(null);
+  const processorRef = useRef(null);
+  const micStreamRef = useRef(null);
+  const interimRef = useRef("");
+  const silenceTimerRef = useRef(null);
 
-  const pickMimeType = () => {
-    const candidates = ["audio/ogg;codecs=opus", "audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
-    for (const c of candidates) {
-      try {
-        if (MediaRecorder.isTypeSupported(c)) return c;
-      } catch {
+  const toDeepgramLanguage = (languageKey) => {
+    const key = String(languageKey || "").trim().toLowerCase();
+    const map = {
+      english: "en",
+      telugu: "te",
+      hindi: "hi",
+      tamil: "ta",
+      kannada: "kn",
+      malayalam: "ml",
+      spanish: "es",
+      french: "fr",
+      german: "de",
+      mandarin: "zh",
+      japanese: "ja",
+      korean: "ko",
+      russian: "ru",
+      portuguese: "pt",
+      arabic: "ar",
+      italian: "it",
+      turkish: "tr",
+      dutch: "nl",
+      vietnamese: "vi",
+      swedish: "sv",
+      polish: "pl",
+      greek: "el",
+      hebrew: "he",
+    };
+    return map[key] || "en";
+  };
+
+  const downsampleBuffer = (buffer, inputSampleRate, outputSampleRate) => {
+    if (outputSampleRate === inputSampleRate) return buffer;
+    const sampleRateRatio = inputSampleRate / outputSampleRate;
+    const newLength = Math.round(buffer.length / sampleRateRatio);
+    const result = new Float32Array(newLength);
+    let offsetResult = 0;
+    let offsetBuffer = 0;
+    while (offsetResult < result.length) {
+      const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+      let accum = 0;
+      let count = 0;
+      for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+        accum += buffer[i];
+        count++;
       }
+      result[offsetResult] = accum / (count || 1);
+      offsetResult++;
+      offsetBuffer = nextOffsetBuffer;
     }
-    return "";
+    return result;
+  };
+
+  const floatTo16BitPCM = (float32Array) => {
+    const buffer = new ArrayBuffer(float32Array.length * 2);
+    const view = new DataView(buffer);
+    let offset = 0;
+    for (let i = 0; i < float32Array.length; i++, offset += 2) {
+      let s = Math.max(-1, Math.min(1, float32Array[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    }
+    return buffer;
+  };
+
+  const flushInterimAsLine = () => {
+    const text = String(interimRef.current || "").trim();
+    if (!text) return;
+    pushCaption({
+      id: `${Date.now()}-interim`,
+      speaker: authUser?.fullName || "You",
+      text,
+      ts: Date.now(),
+    });
+    interimRef.current = "";
+  };
+
+  const scheduleSilenceFlush = () => {
+    try {
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    } catch {
+    }
+    silenceTimerRef.current = setTimeout(() => {
+      flushInterimAsLine();
+    }, 3000);
   };
 
   useEffect(() => {
     if (!captionsEnabled) return;
 
-    let stopped = false;
-    const sessions = new Map();
-
-    const startSession = async ({
-      sessionId,
-      stream,
-      speakerName,
-      stopTracksOnCleanup,
-    }) => {
-      if (!sessionId || !stream) return;
-      if (sessions.has(sessionId)) return;
-
-      const state = {
-        sessionId,
-        stream,
-        speakerName,
-        stopTracksOnCleanup,
-        chunks: [],
-        lastVoiceAt: 0,
-        recorder: null,
-        interval: null,
-        audioCtx: null,
-        analyser: null,
-        rafId: null,
-      };
-
-      const key = sessionId;
-      inFlightRef.current.set(key, false);
-      sessions.set(sessionId, state);
-
-      const startVoiceDetector = () => {
-        try {
-          const AudioCtx = window.AudioContext || window.webkitAudioContext;
-          if (!AudioCtx) return;
-          const audioCtx = new AudioCtx();
-          const source = audioCtx.createMediaStreamSource(stream);
-          const analyser = audioCtx.createAnalyser();
-          analyser.fftSize = 1024;
-          source.connect(analyser);
-
-          const data = new Uint8Array(analyser.frequencyBinCount);
-
-          state.audioCtx = audioCtx;
-          state.analyser = analyser;
-
-          const tick = () => {
-            if (stopped) return;
-            try {
-              analyser.getByteFrequencyData(data);
-              let sum = 0;
-              for (let i = 0; i < data.length; i++) sum += data[i];
-              const avg = sum / (data.length || 1);
-
-              // Heuristic threshold; tuned to catch speech but ignore silence.
-              if (avg > 12) state.lastVoiceAt = Date.now();
-            } catch {
-            }
-            state.rafId = requestAnimationFrame(tick);
-          };
-
-          state.rafId = requestAnimationFrame(tick);
-        } catch {
-        }
-      };
-
-      const flushIfReady = async () => {
-        if (stopped) return;
-        if (inFlightRef.current.get(key)) return;
-        if (!state.chunks.length) return;
-        if (!state.lastVoiceAt) return;
-
-        const silentForMs = Date.now() - state.lastVoiceAt;
-        if (silentForMs < 3000) return;
-
-        const blob = new Blob(state.chunks, { type: state.recorder?.mimeType || "audio/webm" });
-        state.chunks = [];
-
-        inFlightRef.current.set(key, true);
-        try {
-          const sttRes = await callDeepgramStt({ audioBlob: blob, language: spokenLanguage });
-          const text = sttRes?.text || "";
-          if (!text.trim()) return;
-
-          pushCaption({
-            id: `${Date.now()}-${key}`,
-            speaker: state.speakerName || "",
-            text,
-            ts: Date.now(),
-          });
-        } catch {
-        } finally {
-          inFlightRef.current.set(key, false);
-          // reset lastVoiceAt so we don't re-flush immediately on long silences
-          state.lastVoiceAt = 0;
-        }
-      };
-
+    const token = (() => {
       try {
-        const mimeType = pickMimeType();
-        const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-        state.recorder = recorder;
+        return localStorage.getItem("aerosonix_token") || "";
+      } catch {
+        return "";
+      }
+    })();
 
-        recorder.ondataavailable = (evt) => {
+    if (!token) {
+      setCaptionsEnabled(false);
+      return;
+    }
+
+    const lang = toDeepgramLanguage(spokenLanguage);
+
+    const envBackend = import.meta.env.VITE_BACKEND_URL;
+    const httpBase = envBackend
+      ? String(envBackend).replace(/\/+$/, "")
+      : import.meta.env.MODE === "development"
+        ? "http://localhost:5001"
+        : window.location.origin;
+
+    const origin = httpBase.replace(/\/api\/?$/, "");
+    const wsOrigin = origin.startsWith("https://")
+      ? origin.replace(/^https:\/\//, "wss://")
+      : origin.replace(/^http:\/\//, "ws://");
+
+    const wsUrl = `${wsOrigin}/ws/deepgram?token=${encodeURIComponent(token)}&language=${encodeURIComponent(lang)}`;
+
+    let stopped = false;
+
+    const start = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (stopped) return;
+        micStreamRef.current = stream;
+
+        const ws = new WebSocket(wsUrl);
+        socketRef.current = ws;
+
+        ws.onmessage = (evt) => {
           if (stopped) return;
-          if (!evt?.data || evt.data.size === 0) return;
-          state.chunks.push(evt.data);
+          scheduleSilenceFlush();
+
+          let data;
+          try {
+            data = JSON.parse(evt.data);
+          } catch {
+            return;
+          }
+
+          const transcript =
+            data?.channel?.alternatives?.[0]?.transcript ||
+            data?.channel?.alternatives?.[0]?.paragraphs?.transcript ||
+            "";
+
+          if (!String(transcript || "").trim()) return;
+
+          const isFinal =
+            data?.is_final === true ||
+            data?.speech_final === true ||
+            data?.type === "Results";
+
+          interimRef.current = String(transcript || "");
+
+          if (isFinal) {
+            flushInterimAsLine();
+          }
         };
 
-        startVoiceDetector();
+        ws.onerror = () => {
+        };
 
-        // capture frequent small chunks; we only transcribe on silence
-        recorder.start(500);
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const audioCtx = new AudioCtx();
+        audioCtxRef.current = audioCtx;
 
-        state.interval = setInterval(() => {
-          flushIfReady();
-        }, 250);
+        const source = audioCtx.createMediaStreamSource(stream);
+        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+        processorRef.current = processor;
+        source.connect(processor);
+        processor.connect(audioCtx.destination);
+
+        processor.onaudioprocess = (e) => {
+          if (stopped) return;
+          if (ws.readyState !== WebSocket.OPEN) return;
+
+          const input = e.inputBuffer.getChannelData(0);
+          const down = downsampleBuffer(input, audioCtx.sampleRate, 16000);
+          const pcm16 = floatTo16BitPCM(down);
+
+          try {
+            ws.send(pcm16);
+          } catch {
+          }
+        };
       } catch {
-        sessions.delete(sessionId);
-        inFlightRef.current.delete(key);
       }
     };
 
-    const boot = async () => {
-      try {
-        const localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        await startSession({
-          sessionId: "local",
-          stream: localStream,
-          speakerName: authUser?.fullName || "You",
-          stopTracksOnCleanup: true,
-        });
-      } catch {
-      }
-
-      for (const p of participants || []) {
-        if (!p) continue;
-        if (!hasAudio(p)) continue;
-        if (!p.sessionId) continue;
-        if (!p.audioStream) continue;
-        await startSession({
-          sessionId: p.sessionId,
-          stream: p.audioStream,
-          speakerName: p.name || p.userId || "",
-          stopTracksOnCleanup: false,
-        });
-      }
-    };
-
-    boot();
+    start();
 
     return () => {
       stopped = true;
 
-      for (const s of sessions.values()) {
-        try {
-          if (s.interval) clearInterval(s.interval);
-        } catch {
-        }
-
-        try {
-          s.recorder?.stop?.();
-        } catch {
-        }
-
-        try {
-          if (s.rafId) cancelAnimationFrame(s.rafId);
-        } catch {
-        }
-
-        try {
-          s.audioCtx?.close?.();
-        } catch {
-        }
-
-        if (s.stopTracksOnCleanup) {
-          try {
-            for (const t of s.stream?.getTracks?.() || []) t.stop();
-          } catch {
-          }
-        }
+      try {
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      } catch {
       }
 
-      sessions.clear();
-      inFlightRef.current.clear();
+      try {
+        processorRef.current?.disconnect?.();
+      } catch {
+      }
+
+      try {
+        audioCtxRef.current?.close?.();
+      } catch {
+      }
+
+      try {
+        socketRef.current?.close?.();
+      } catch {
+      }
+
+      try {
+        for (const t of micStreamRef.current?.getTracks?.() || []) t.stop();
+      } catch {
+      }
+
+      interimRef.current = "";
     };
-  }, [authUser?.fullName, captionsEnabled, participants, pushCaption, spokenLanguage]);
+  }, [authUser?.fullName, captionsEnabled, pushCaption, setCaptionsEnabled, spokenLanguage]);
 
   return (
     <div className="absolute top-4 right-4 z-20 flex flex-col gap-2 bg-base-100/80 backdrop-blur rounded-xl border border-base-300 p-3">
