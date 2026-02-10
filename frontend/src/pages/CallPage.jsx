@@ -139,11 +139,11 @@ const CallContent = () => {
   const callingState = useCallCallingState();
 
   const navigate = useNavigate();
+  const { authUser } = useAuthUser();
 
   const [captionsEnabled, setCaptionsEnabled] = useState(false);
   const [spokenLanguage, setSpokenLanguage] = useState("english");
-  const [captionText, setCaptionText] = useState("");
-  const [captionSpeaker, setCaptionSpeaker] = useState("");
+  const [captions, setCaptions] = useState([]);
 
   useEffect(() => {
     if (callingState === CallingState.LEFT) {
@@ -156,18 +156,23 @@ const CallContent = () => {
   return (
     <StreamTheme>
       <CaptionControls
+        authUser={authUser}
         captionsEnabled={captionsEnabled}
         setCaptionsEnabled={setCaptionsEnabled}
         spokenLanguage={spokenLanguage}
         setSpokenLanguage={setSpokenLanguage}
-        setCaptionText={setCaptionText}
-        setCaptionSpeaker={setCaptionSpeaker}
+        pushCaption={(c) =>
+          setCaptions((prev) => {
+            const next = [...prev, c];
+            return next.length > 8 ? next.slice(next.length - 8) : next;
+          })
+        }
       />
       <div className="w-full h-[100dvh] flex flex-col">
         <div className="flex-1 min-h-0">
           <SpeakerLayout />
         </div>
-        {captionsEnabled ? <CaptionBar text={captionText} speaker={captionSpeaker} /> : null}
+        {captionsEnabled ? <CaptionBar captions={captions} /> : null}
         <CallControls />
       </div>
     </StreamTheme>
@@ -175,23 +180,78 @@ const CallContent = () => {
 };
 
 const CaptionControls = ({
+  authUser,
   captionsEnabled,
   setCaptionsEnabled,
   spokenLanguage,
   setSpokenLanguage,
-  setCaptionText,
-  setCaptionSpeaker,
+  pushCaption,
 }) => {
   const { useParticipants } = useCallStateHooks();
   const participants = useParticipants();
 
   const inFlightRef = useRef(new Map());
 
+  const pickMimeType = () => {
+    const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+    for (const c of candidates) {
+      try {
+        if (MediaRecorder.isTypeSupported(c)) return c;
+      } catch {
+      }
+    }
+    return "";
+  };
+
   useEffect(() => {
     if (!captionsEnabled) return;
 
     let stopped = false;
     const recorders = new Map();
+
+    let localStream;
+    let localRecorder;
+
+    const startLocal = async () => {
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (stopped) return;
+
+        const mimeType = pickMimeType();
+        localRecorder = new MediaRecorder(localStream, mimeType ? { mimeType } : undefined);
+
+        localRecorder.ondataavailable = async (evt) => {
+          if (stopped) return;
+          if (!evt?.data || evt.data.size === 0) return;
+
+          const key = "local";
+          if (inFlightRef.current.get(key)) return;
+          inFlightRef.current.set(key, true);
+
+          try {
+            const sttRes = await callWhisperStt({
+              audioBlob: evt.data,
+              language: spokenLanguage,
+              translate: false,
+            });
+            const text = sttRes?.text || "";
+            if (!text.trim()) return;
+            pushCaption({
+              id: `${Date.now()}-local`,
+              speaker: authUser?.fullName || "You",
+              text,
+              ts: Date.now(),
+            });
+          } catch {
+          } finally {
+            inFlightRef.current.set(key, false);
+          }
+        };
+
+        localRecorder.start(1200);
+      } catch {
+      }
+    };
 
     const startForParticipant = async (p) => {
       if (!p) return;
@@ -203,7 +263,8 @@ const CaptionControls = ({
       if (!stream) return;
 
       try {
-        const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+        const mimeType = pickMimeType();
+        const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
         recorders.set(p.sessionId, recorder);
         inFlightRef.current.set(p.sessionId, false);
 
@@ -217,13 +278,17 @@ const CaptionControls = ({
             const sttRes = await callWhisperStt({
               audioBlob: evt.data,
               language: spokenLanguage,
-              translate: true,
+              translate: false,
             });
             const text = sttRes?.text || "";
             if (!text.trim()) return;
 
-            setCaptionText(text);
-            setCaptionSpeaker(p.name || p.userId || "");
+            pushCaption({
+              id: `${Date.now()}-${p.sessionId}`,
+              speaker: p.name || p.userId || "",
+              text,
+              ts: Date.now(),
+            });
           } catch {
           } finally {
             inFlightRef.current.set(p.sessionId, false);
@@ -236,6 +301,7 @@ const CaptionControls = ({
     };
 
     const boot = async () => {
+      await startLocal();
       for (const p of participants || []) {
         await startForParticipant(p);
       }
@@ -251,10 +317,21 @@ const CaptionControls = ({
         } catch {
         }
       }
+
+      try {
+        localRecorder?.stop();
+      } catch {
+      }
+
+      try {
+        for (const t of localStream?.getTracks?.() || []) t.stop();
+      } catch {
+      }
+
       recorders.clear();
       inFlightRef.current.clear();
     };
-  }, [captionsEnabled, participants, spokenLanguage, setCaptionSpeaker, setCaptionText]);
+  }, [authUser?.fullName, captionsEnabled, participants, pushCaption, spokenLanguage]);
 
   return (
     <div className="absolute top-4 right-4 z-20 flex flex-col gap-2 bg-base-100/80 backdrop-blur rounded-xl border border-base-300 p-3">
@@ -284,22 +361,28 @@ const CaptionControls = ({
   );
 };
 
-const CaptionBar = ({ text, speaker }) => {
-  const value = String(text || "").trim();
-  const who = String(speaker || "").trim();
+const CaptionBar = ({
+  captions,
+}) => {
+  const list = Array.isArray(captions) ? captions : [];
 
   return (
     <div className="w-full px-4 pb-4">
-      <div className="w-full rounded-xl border border-base-300 bg-base-100/90 backdrop-blur px-4 py-3 min-h-[56px] flex items-center">
-        <div className="text-sm w-full truncate">
-          {value ? (
-            <span>
-              {who ? <span className="font-semibold mr-2">{who}:</span> : null}
-              <span>{value}</span>
-            </span>
-          ) : (
-            <span className="opacity-60">Listening…</span>
-          )}
+      <div className="card bg-base-200 border border-base-300">
+        <div className="card-body p-3">
+          <div className="text-xs opacity-70 mb-1">Captions</div>
+          <div className="text-sm space-y-1">
+            {list.length ? (
+              list.slice(-3).map((c) => (
+                <div key={c.id} className="w-full truncate">
+                  {c.speaker ? <span className="font-semibold mr-2">{c.speaker}:</span> : null}
+                  <span>{c.text}</span>
+                </div>
+              ))
+            ) : (
+              <div className="opacity-60">Listening…</div>
+            )}
+          </div>
         </div>
       </div>
     </div>
