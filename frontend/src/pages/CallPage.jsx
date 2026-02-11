@@ -342,9 +342,11 @@ const CaptionControls = ({
         if (microphoneState?.mediaStream) {
           publishedAudio = microphoneState.mediaStream;
           maybeMediaStreamTrack = publishedAudio.getAudioTracks()?.[0];
+          console.log("[Captions] Using microphone.mediaStream method");
         } else if (microphoneState?.track) {
           publishedAudio = microphoneState.track;
           maybeMediaStreamTrack = publishedAudio;
+          console.log("[Captions] Using microphone.track method");
         }
         
         // Method 2: Try accessing through call participants
@@ -354,6 +356,7 @@ const CaptionControls = ({
           
           if (localParticipant?.microphone?.track) {
             maybeMediaStreamTrack = localParticipant.microphone.track;
+            console.log("[Captions] Using localParticipant.microphone.track method");
           }
         }
         
@@ -366,7 +369,9 @@ const CaptionControls = ({
 
         if (isUsableTrack) {
           stream = new MediaStream([maybeMediaStreamTrack]);
+          console.log("[Captions] Using Stream audio track");
         } else {
+          console.log("[Captions] Falling back to getUserMedia");
           try {
             stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           } catch {
@@ -444,21 +449,33 @@ const CaptionControls = ({
 
         connectWebSocket();
 
+        let audioChunkCount = 0;
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtx) return;
+        if (!AudioCtx) {
+          console.error("[Captions] AudioContext not supported");
+          return;
+        }
         const audioCtx = new AudioCtx({ sampleRate: 16000, latencyHint: "interactive" });
         audioCtxRef.current = audioCtx;
+        console.log("[Captions] AudioContext created with sampleRate:", audioCtx.sampleRate);
 
         try {
           await audioCtx.resume();
-        } catch {
+          console.log("[Captions] AudioContext resumed");
+        } catch (error) {
+          console.error("[Captions] Error resuming AudioContext:", error);
         }
 
         const source = audioCtx.createMediaStreamSource(stream);
         const processor = audioCtx.createScriptProcessor(4096, 1, 1);
         processorRef.current = processor;
+        
+        console.log("[Captions] Audio processor created, buffer size:", processor.bufferSize);
+        
         source.connect(processor);
         processor.connect(audioCtx.destination);
+        
+        console.log("[Captions] Audio nodes connected");
 
         processor.onaudioprocess = (e) => {
           if (stopped) return;
@@ -466,12 +483,30 @@ const CaptionControls = ({
           if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return;
 
           const input = e.inputBuffer.getChannelData(0);
+          
+          // Check if input has actual audio data (not all zeros)
+          let hasAudio = false;
+          for (let i = 0; i < Math.min(100, input.length); i++) {
+            if (Math.abs(input[i]) > 0.001) {
+              hasAudio = true;
+              break;
+            }
+          }
+          
+          // Always send audio data to keep Deepgram connection alive
           const down = downsampleBuffer(input, audioCtx.sampleRate, 16000);
           const pcm16 = floatTo16BitPCM(down);
 
           try {
             currentWs.send(pcm16);
-          } catch {
+            audioChunkCount++;
+            
+            // Log every 50 chunks (approximately every 2 seconds)
+            if (audioChunkCount % 50 === 0) {
+              console.log("[Captions] Sent audio chunk #" + audioChunkCount + ", size: " + pcm16.byteLength + ", hasAudio: " + hasAudio);
+            }
+          } catch (error) {
+            console.error("[Captions] Error sending audio:", error);
           }
         };
       } catch {
