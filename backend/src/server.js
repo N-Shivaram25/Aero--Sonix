@@ -160,7 +160,7 @@ const setupDeepgramWsProxy = (server) => {
     const wantsAutoLang = language.toLowerCase() === "auto";
 
     const dgUrl =
-      `wss://api.deepgram.com/v1/listen?model=general` +
+      `wss://api.deepgram.com/v1/listen?model=whisper-large` +
       `&punctuate=true&smart_format=true&interim_results=true` +
       (wantsAutoLang ? `&detect_language=true` : `&language=${encodeURIComponent(language)}`) +
       `&encoding=linear16&sample_rate=16000&channels=1`;
