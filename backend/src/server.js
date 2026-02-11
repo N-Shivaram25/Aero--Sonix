@@ -141,6 +141,7 @@ const setupDeepgramWsProxy = (server) => {
   });
 
   wss.on("connection", async (clientWs) => {
+    console.log("[DeepgramProxy] client connected");
     const apiKey = process.env.DEEPGRAM_API_KEY;
     if (!apiKey) {
       try {
@@ -172,6 +173,7 @@ const setupDeepgramWsProxy = (server) => {
 
     const openTimeout = setTimeout(() => {
       if (dgOpened) return;
+      console.log("[DeepgramProxy] deepgram connection timeout");
       try {
         clientWs.send(JSON.stringify({ type: "error", message: "Deepgram connection timeout" }));
       } catch {
@@ -183,6 +185,7 @@ const setupDeepgramWsProxy = (server) => {
     const cleanup = (reason) => {
       if (closed) return;
       closed = true;
+      console.log("[DeepgramProxy] cleanup", reason || "(no reason)");
       try {
         clearTimeout(openTimeout);
       } catch {
@@ -199,6 +202,7 @@ const setupDeepgramWsProxy = (server) => {
 
     dgWs.on("open", () => {
       dgOpened = true;
+      console.log("[DeepgramProxy] deepgram socket open");
       try {
         clearTimeout(openTimeout);
       } catch {
@@ -224,6 +228,7 @@ const setupDeepgramWsProxy = (server) => {
     });
 
     dgWs.on("unexpected-response", (req, res) => {
+      console.log("[DeepgramProxy] deepgram unexpected-response", res?.statusCode);
       try {
         clientWs.send(
           JSON.stringify({
@@ -238,12 +243,21 @@ const setupDeepgramWsProxy = (server) => {
 
     dgWs.on("close", (code, reason) => {
       const msg = reason ? reason.toString() : "Deepgram socket closed";
+      console.log("[DeepgramProxy] deepgram socket close", code, msg);
       cleanup(`${msg} (${code || "no_code"})`);
     });
-    dgWs.on("error", () => cleanup("Deepgram socket error"));
+    dgWs.on("error", (err) => {
+      console.log("[DeepgramProxy] deepgram socket error", err?.message || err);
+      cleanup("Deepgram socket error");
+    });
 
+    let gotAnyAudio = false;
     clientWs.on("message", (chunk) => {
       if (closed) return;
+      if (!gotAnyAudio) {
+        gotAnyAudio = true;
+        console.log("[DeepgramProxy] first audio chunk", typeof chunk, chunk?.length);
+      }
       if (dgWs.readyState !== WebSocket.OPEN) {
         if (pendingChunks.length < maxPendingChunks) pendingChunks.push(chunk);
         return;
@@ -255,8 +269,15 @@ const setupDeepgramWsProxy = (server) => {
       }
     });
 
-    clientWs.on("close", () => cleanup("Client disconnected"));
-    clientWs.on("error", () => cleanup("Client socket error"));
+    clientWs.on("close", (code, reason) => {
+      const msg = reason ? reason.toString() : "Client disconnected";
+      console.log("[DeepgramProxy] client close", code, msg);
+      cleanup(msg);
+    });
+    clientWs.on("error", (err) => {
+      console.log("[DeepgramProxy] client socket error", err?.message || err);
+      cleanup("Client socket error");
+    });
   });
 };
 
