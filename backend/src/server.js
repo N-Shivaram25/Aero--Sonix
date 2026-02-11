@@ -174,10 +174,12 @@ const setupDeepgramWsProxy = (server) => {
       'as': 'as-IN'
     };
     const sarvamLanguage = languageMap[language] || 'en-IN';
+    console.log("[SarvamProxy] Original language:", language, "-> mapped to:", sarvamLanguage);
 
-    const sarvamUrl = `wss://api.sarvam.ai/speech-to-text/ws?model=saaras:v3&mode=transcribe&language-code=${sarvamLanguage}&sample_rate=16000&input_audio_codec=pcm_s16le`;
+    const sarvamUrl = `wss://api.sarvam.ai/speech-to-text/ws?model=saaras:v3&mode=transcribe&language-code=${encodeURIComponent(sarvamLanguage)}&sample_rate=16000&input_audio_codec=pcm_s16le`;
 
     console.log("[SarvamProxy] Connecting to Sarvam with URL:", sarvamUrl);
+    console.log("[SarvamProxy] Mode: transcribe (should preserve original language)");
     const sarvamWs = new WebSocket(sarvamUrl, {
       headers: {
         'Api-Subscription-Key': apiKey,
@@ -261,22 +263,29 @@ const setupDeepgramWsProxy = (server) => {
         const message = JSON.parse(data.toString());
         console.log("[SarvamProxy] Received message:", message);
         
-        // Forward transcript messages to client (transcription endpoint sends different format)
+        // Handle transcription endpoint responses
         if (message.type === 'data' && message.data?.transcript) {
           console.log("[SarvamProxy] Forwarding transcript:", message.data.transcript);
+          console.log("[SarvamProxy] Language detected:", message.data.language_code);
           clientWs.send(JSON.stringify({
             type: 'transcript',
             text: message.data.transcript,
-            is_final: true
+            is_final: true,
+            language_code: message.data.language_code
           }));
         } else if (message.type === 'transcript' && message.data?.transcript) {
-          // Alternative format
+          // Alternative format for transcription endpoint
           console.log("[SarvamProxy] Forwarding transcript (alt format):", message.data.transcript);
+          console.log("[SarvamProxy] Language detected:", message.data.language_code);
           clientWs.send(JSON.stringify({
             type: 'transcript',
             text: message.data.transcript,
-            is_final: true
+            is_final: true,
+            language_code: message.data.language_code
           }));
+        } else if (message.type === 'events') {
+          // Handle VAD events (speech start/end)
+          console.log("[SarvamProxy] Speech event:", message.data.signal_type);
         }
       } catch (error) {
         console.error("[SarvamProxy] Error processing message:", error);
