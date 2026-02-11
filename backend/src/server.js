@@ -262,7 +262,8 @@ const setupDeepgramWsProxy = (server) => {
         console.log("[SarvamProxy] Received message:", message);
         
         // Forward transcript messages to client
-        if (message.type === 'transcript' && message.data?.transcript) {
+        if (message.type === 'data' && message.data?.transcript) {
+          console.log("[SarvamProxy] Forwarding transcript:", message.data.transcript);
           clientWs.send(JSON.stringify({
             type: 'transcript',
             text: message.data.transcript,
