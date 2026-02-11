@@ -176,10 +176,10 @@ const setupDeepgramWsProxy = (server) => {
     const sarvamLanguage = languageMap[language] || 'en-IN';
     console.log("[SarvamProxy] Original language:", language, "-> mapped to:", sarvamLanguage);
 
-    const sarvamUrl = `wss://api.sarvam.ai/speech-to-text/ws?model=saaras:v3&mode=transcribe&language-code=${encodeURIComponent(sarvamLanguage)}&sample_rate=16000&input_audio_codec=pcm_s16le`;
+    const sarvamUrl = `wss://api.sarvam.ai/speech-to-text/ws?model=saaras:v3&mode=verbatim&language-code=${encodeURIComponent(sarvamLanguage)}&sample_rate=16000&input_audio_codec=pcm_s16le`;
 
     console.log("[SarvamProxy] Connecting to Sarvam with URL:", sarvamUrl);
-    console.log("[SarvamProxy] Mode: transcribe (should preserve original language)");
+    console.log("[SarvamProxy] Mode: verbatim (should preserve original language exactly)");
     const sarvamWs = new WebSocket(sarvamUrl, {
       headers: {
         'Api-Subscription-Key': apiKey,
