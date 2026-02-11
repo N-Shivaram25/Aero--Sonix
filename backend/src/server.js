@@ -216,6 +216,13 @@ const setupDeepgramWsProxy = (server) => {
       'as': 'as-IN'
     };
     
+    // Get current user's profile language (this is the speaker)
+    const speaker = clientWs.user;
+    const speakerLanguageRaw = speaker?.profileLanguage || 'en';
+    const speakerLanguageCode = normalizeSarvamLanguageCode(speakerLanguageRaw, languageMap) || 'en-IN';
+    
+    console.log("[SarvamProxy] Speaker profile language:", speakerLanguageRaw, "->", speakerLanguageCode);
+    
     // Check for Sarvam API key
     const apiKey = process.env.SARVAM_API_KEY;
     if (!apiKey) {
@@ -323,7 +330,7 @@ const setupDeepgramWsProxy = (server) => {
       if (closed) return;
       try {
         const message = JSON.parse(data.toString());
-        console.log("[SarvamProxy] Received message:", message);
+        console.log("[SarvamProxy] Received Sarvam message:", JSON.stringify(message, null, 2));
         
         // Handle transcription endpoint responses
         if (message.type === 'data' && message.data?.transcript) {
@@ -333,28 +340,31 @@ const setupDeepgramWsProxy = (server) => {
           
           console.log("[SarvamProxy] Forwarding transcript:", originalText);
           console.log("[SarvamProxy] Language detected:", detectedLanguage);
+          console.log("[SarvamProxy] Using speaker profile language for translation:", speakerLanguageCode);
           
-          // Only translate if the detected language is different from user's profile language
+          // Translate from speaker's profile language to target language if they're different
           let translatedText = null;
-          if (detectedLanguage && targetLanguageCode && detectedLanguage !== targetLanguageCode) {
-            const sourceForTranslate = /^[a-z]{2}-IN$/i.test(String(detectedLanguage || "")) ? detectedLanguage : "auto";
-            console.log("[SarvamProxy] Translating from", sourceForTranslate, "to", targetLanguageCode);
-            translatedText = await translateText(originalText, sourceForTranslate, targetLanguageCode);
-            if (translatedText) {
-              console.log("[SarvamProxy] Translation result:", translatedText);
-            }
+          if (speakerLanguageCode && targetLanguageCode && speakerLanguageCode !== targetLanguageCode) {
+            console.log("[SarvamProxy] Translating from speaker profile language", speakerLanguageCode, "to", targetLanguageCode);
+            translatedText = await translateText(originalText, speakerLanguageCode, targetLanguageCode);
+            console.log("[SarvamProxy] Translation result:", translatedText);
           }
           
-          // Send both original and translated text
-          clientWs.send(JSON.stringify({
+          const outgoing = {
             type: 'transcript',
             original_text: originalText,
-            original_language: detectedLanguage,
+            original_language: speakerLanguageCode,
             translated_text: translatedText,
             translated_language: translatedText ? targetLanguageCode : null,
             is_final: true,
-            language_code: detectedLanguage
-          }));
+            language_code: detectedLanguage,
+            speaker_profile_language: speakerLanguageCode,
+            speaker_profile_language_raw: speakerLanguageRaw,
+            target_language: targetLanguageCode,
+            target_language_raw: targetLanguageRaw
+          };
+          console.log("[SarvamProxy] Sending to client:", JSON.stringify(outgoing, null, 2));
+          clientWs.send(JSON.stringify(outgoing));
           
         } else if (message.type === 'transcript' && message.data?.transcript) {
           // Alternative format for transcription endpoint
@@ -364,32 +374,37 @@ const setupDeepgramWsProxy = (server) => {
           
           console.log("[SarvamProxy] Forwarding transcript (alt format):", originalText);
           console.log("[SarvamProxy] Language detected:", detectedLanguage);
+          console.log("[SarvamProxy] Using speaker profile language for translation:", speakerLanguageCode);
           
-          // Only translate if the detected language is different from user's profile language
+          // Translate from speaker's profile language to target language if they're different
           let translatedText = null;
-          if (detectedLanguage && targetLanguageCode && detectedLanguage !== targetLanguageCode) {
-            const sourceForTranslate = /^[a-z]{2}-IN$/i.test(String(detectedLanguage || "")) ? detectedLanguage : "auto";
-            console.log("[SarvamProxy] Translating from", sourceForTranslate, "to", targetLanguageCode);
-            translatedText = await translateText(originalText, sourceForTranslate, targetLanguageCode);
-            if (translatedText) {
-              console.log("[SarvamProxy] Translation result:", translatedText);
-            }
+          if (speakerLanguageCode && targetLanguageCode && speakerLanguageCode !== targetLanguageCode) {
+            console.log("[SarvamProxy] Translating from speaker profile language", speakerLanguageCode, "to", targetLanguageCode);
+            translatedText = await translateText(originalText, speakerLanguageCode, targetLanguageCode);
+            console.log("[SarvamProxy] Translation result:", translatedText);
           }
           
-          // Send both original and translated text
-          clientWs.send(JSON.stringify({
+          const outgoing = {
             type: 'transcript',
             original_text: originalText,
-            original_language: detectedLanguage,
+            original_language: speakerLanguageCode,
             translated_text: translatedText,
             translated_language: translatedText ? targetLanguageCode : null,
             is_final: true,
-            language_code: detectedLanguage
-          }));
+            language_code: detectedLanguage,
+            speaker_profile_language: speakerLanguageCode,
+            speaker_profile_language_raw: speakerLanguageRaw,
+            target_language: targetLanguageCode,
+            target_language_raw: targetLanguageRaw
+          };
+          console.log("[SarvamProxy] Sending to client (alt):", JSON.stringify(outgoing, null, 2));
+          clientWs.send(JSON.stringify(outgoing));
           
         } else if (message.type === 'events') {
           // Handle VAD events (speech start/end)
           console.log("[SarvamProxy] Speech event:", message.data.signal_type);
+        } else {
+          console.log("[SarvamProxy] Unhandled message type:", message.type);
         }
       } catch (error) {
         console.error("[SarvamProxy] Error processing message:", error);

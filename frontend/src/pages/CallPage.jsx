@@ -427,6 +427,8 @@ const CaptionControls = ({
               return;
             }
 
+            console.log("[Captions] Received WS message:", JSON.stringify(data, null, 2));
+
             // Handle both Deepgram and Sarvam message formats
             const transcript =
               data?.channel?.alternatives?.[0]?.transcript || // Deepgram format
@@ -448,32 +450,59 @@ const CaptionControls = ({
               // Send original text
               interimRef.current = String(data.original_text || "");
               if (isFinal) {
-                pushCaption({
+                const originalCaption = {
                   id: Date.now().toString(),
                   speaker: authUser?.fullName || "You",
                   text: data.original_text,
                   timestamp: new Date().toISOString(),
-                  type: "original"
-                });
+                  type: "original",
+                  language: data.speaker_profile_language_raw || "Unknown",
+                  speaker_profile_language: data.speaker_profile_language,
+                  speaker_profile_language_raw: data.speaker_profile_language_raw,
+                  target_language: data.target_language,
+                  target_language_raw: data.target_language_raw
+                };
+                console.log("[Captions] Pushing original caption:", JSON.stringify(originalCaption, null, 2));
+                pushCaption(originalCaption);
               }
               
               // Send translated text with a small delay
               setTimeout(() => {
                 if (data.translated_text) {
-                  pushCaption({
+                  const translatedCaption = {
                     id: (Date.now() + 1).toString(),
                     speaker: authUser?.fullName || "You",
                     text: data.translated_text,
                     timestamp: new Date().toISOString(),
-                    type: "translation"
-                  });
+                    type: "translation",
+                    language: data.target_language_raw || "Unknown",
+                    speaker_profile_language: data.speaker_profile_language,
+                    speaker_profile_language_raw: data.speaker_profile_language_raw,
+                    target_language: data.target_language,
+                    target_language_raw: data.target_language_raw
+                  };
+                  console.log("[Captions] Pushing translated caption:", JSON.stringify(translatedCaption, null, 2));
+                  pushCaption(translatedCaption);
                 }
               }, 100);
             } else {
               // Single caption (no translation needed)
               interimRef.current = String(transcript || "");
               if (isFinal) {
-                flushInterimAsLine();
+                const caption = {
+                  id: Date.now().toString(),
+                  speaker: authUser?.fullName || "You",
+                  text: transcript,
+                  timestamp: new Date().toISOString(),
+                  type: "original",
+                  language: data?.speaker_profile_language_raw || "Unknown",
+                  speaker_profile_language: data?.speaker_profile_language,
+                  speaker_profile_language_raw: data?.speaker_profile_language_raw,
+                  target_language: data?.target_language,
+                  target_language_raw: data?.target_language_raw
+                };
+                console.log("[Captions] Pushing single caption:", JSON.stringify(caption, null, 2));
+                pushCaption(caption);
               }
             }
           };
@@ -642,7 +671,7 @@ const CaptionBar = ({
   const originalList = list.filter((c) => c?.type !== "translation");
   const translationList = list.filter((c) => c?.type === "translation");
 
-  const renderList = (items, emptyText) => {
+  const renderList = (items, emptyText, type) => {
     if (!items.length) {
       return (
         <div className="flex items-center justify-center h-16 text-base-content/60 italic">
@@ -663,8 +692,15 @@ const CaptionBar = ({
               index === items.slice(-6).length - 1 ? "ring-2 ring-primary/20" : ""
             }`}
           >
-            <div className="text-xs font-bold uppercase tracking-wide text-primary">
-              {c.speaker || "Speaker"}
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-bold uppercase tracking-wide text-primary">
+                {c.speaker || "Speaker"}
+              </div>
+              {c.language && (
+                <div className="text-xs text-base-content/60">
+                  {c.language}
+                </div>
+              )}
             </div>
             <div className="mt-1 text-sm leading-relaxed text-base-content">{c.text}</div>
           </div>
@@ -673,32 +709,45 @@ const CaptionBar = ({
     );
   };
 
+  // Get the latest caption to extract language info
+  const latestCaption = list[list.length - 1];
+  const speakerLang = latestCaption?.speaker_profile_language_raw || "Unknown";
+  const targetLang = latestCaption?.target_language_raw || "Unknown";
+
   return (
     <div className="w-full px-4 pb-2">
       <div className="bg-base-100/90 backdrop-blur-md rounded-2xl border border-base-300 shadow-lg p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 bg-success rounded-full animate-pulse"></div>
-            <span className="text-sm font-bold text-primary">Captions</span>
+            <span className="text-sm font-bold text-primary">Live Captions</span>
           </div>
-          <span className="text-xs text-base-content/60">{list.length} lines</span>
+          <div className="flex items-center gap-2 text-xs text-base-content/60">
+            <span>Speaker: {speakerLang}</span>
+            <span>→</span>
+            <span>Target: {targetLang}</span>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="rounded-xl border border-primary/20 bg-primary/5 p-3">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-xs font-bold uppercase tracking-wide text-primary">Original</div>
+              <div className="text-xs font-bold uppercase tracking-wide text-primary">
+                Original ({speakerLang})
+              </div>
               <div className="text-xs text-base-content/60">{originalList.length}</div>
             </div>
-            {renderList(originalList, "Waiting for speech...")}
+            {renderList(originalList, "Waiting for speech...", "original")}
           </div>
 
           <div className="rounded-xl border border-info/30 bg-info/5 p-3">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-xs font-bold uppercase tracking-wide text-info">Translation</div>
+              <div className="text-xs font-bold uppercase tracking-wide text-info">
+                Translation ({targetLang})
+              </div>
               <div className="text-xs text-base-content/60">{translationList.length}</div>
             </div>
-            {renderList(translationList, "Waiting for translation...")}
+            {renderList(translationList, "Waiting for translation...", "translation")}
           </div>
         </div>
       </div>
