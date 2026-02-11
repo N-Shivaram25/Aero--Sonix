@@ -166,7 +166,11 @@ const setupDeepgramWsProxy = (server) => {
       `&encoding=linear16&sample_rate=16000&channels=1&endpointing=200`;
 
     console.log("[DeepgramProxy] Connecting to Deepgram with URL:", dgUrl.replace(/token=[^&]*/, "token=REDACTED"));
-    const dgWs = new WebSocket(dgUrl, ["token", apiKey]);
+    const dgWs = new WebSocket(dgUrl, {
+      headers: {
+        Authorization: `Token ${apiKey}`,
+      },
+    });
 
     let dgOpened = false;
     const pendingChunks = [];
@@ -210,7 +214,7 @@ const setupDeepgramWsProxy = (server) => {
       }
       
       // Send a small silence chunk to test the connection
-      const silenceChunk = new ArrayBuffer(1024); // 1024 bytes of silence
+      const silenceChunk = Buffer.alloc(1024); // 1024 bytes of silence
       try {
         dgWs.send(silenceChunk);
         console.log("[DeepgramProxy] Sent initial silence chunk");
