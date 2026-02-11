@@ -28,28 +28,40 @@ async function translateText(text, sourceLang, targetLang) {
       return null;
     }
 
-    const response = await fetch('https://api.sarvam.ai/translate/text', {
+    const src = String(sourceLang || "").trim() || "auto";
+    const tgt = String(targetLang || "").trim();
+    if (!tgt) return null;
+
+    console.log("[Translation] Request", { src, tgt });
+
+    const response = await fetch('https://api.sarvam.ai/translate', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Api-Subscription-Key': apiKey,
+        'api-subscription-key': apiKey,
       },
       body: JSON.stringify({
         input: text,
-        source_language_code: sourceLang,
-        target_language_code: targetLang,
+        source_language_code: src,
+        target_language_code: tgt,
         mode: "formal",
         model: "sarvam-translate:v1"
       })
     });
 
     if (!response.ok) {
-      console.error("[Translation] API error:", response.status, response.statusText);
+      let errBody = "";
+      try {
+        errBody = await response.text();
+      } catch {
+      }
+      console.error("[Translation] API error:", response.status, response.statusText, errBody);
       return null;
     }
 
     const result = await response.json();
-    return result.translated_text || null;
+    console.log("[Translation] Response", result);
+    return result?.translated_text || null;
   } catch (error) {
     console.error("[Translation] Error:", error);
     return null;
@@ -316,7 +328,8 @@ const setupDeepgramWsProxy = (server) => {
         // Handle transcription endpoint responses
         if (message.type === 'data' && message.data?.transcript) {
           const originalText = message.data.transcript;
-          const detectedLanguage = message.data.language_code || sarvamLanguage;
+          const detectedLanguageRaw = message.data.language_code || sarvamLanguage;
+          const detectedLanguage = normalizeSarvamLanguageCode(detectedLanguageRaw, languageMap) || detectedLanguageRaw;
           
           console.log("[SarvamProxy] Forwarding transcript:", originalText);
           console.log("[SarvamProxy] Language detected:", detectedLanguage);
@@ -324,8 +337,9 @@ const setupDeepgramWsProxy = (server) => {
           // Only translate if the detected language is different from user's profile language
           let translatedText = null;
           if (detectedLanguage && targetLanguageCode && detectedLanguage !== targetLanguageCode) {
-            console.log("[SarvamProxy] Translating from", detectedLanguage, "to", targetLanguageCode);
-            translatedText = await translateText(originalText, detectedLanguage, targetLanguageCode);
+            const sourceForTranslate = /^[a-z]{2}-IN$/i.test(String(detectedLanguage || "")) ? detectedLanguage : "auto";
+            console.log("[SarvamProxy] Translating from", sourceForTranslate, "to", targetLanguageCode);
+            translatedText = await translateText(originalText, sourceForTranslate, targetLanguageCode);
             if (translatedText) {
               console.log("[SarvamProxy] Translation result:", translatedText);
             }
@@ -345,7 +359,8 @@ const setupDeepgramWsProxy = (server) => {
         } else if (message.type === 'transcript' && message.data?.transcript) {
           // Alternative format for transcription endpoint
           const originalText = message.data.transcript;
-          const detectedLanguage = message.data.language_code || sarvamLanguage;
+          const detectedLanguageRaw = message.data.language_code || sarvamLanguage;
+          const detectedLanguage = normalizeSarvamLanguageCode(detectedLanguageRaw, languageMap) || detectedLanguageRaw;
           
           console.log("[SarvamProxy] Forwarding transcript (alt format):", originalText);
           console.log("[SarvamProxy] Language detected:", detectedLanguage);
@@ -353,8 +368,9 @@ const setupDeepgramWsProxy = (server) => {
           // Only translate if the detected language is different from user's profile language
           let translatedText = null;
           if (detectedLanguage && targetLanguageCode && detectedLanguage !== targetLanguageCode) {
-            console.log("[SarvamProxy] Translating from", detectedLanguage, "to", targetLanguageCode);
-            translatedText = await translateText(originalText, detectedLanguage, targetLanguageCode);
+            const sourceForTranslate = /^[a-z]{2}-IN$/i.test(String(detectedLanguage || "")) ? detectedLanguage : "auto";
+            console.log("[SarvamProxy] Translating from", sourceForTranslate, "to", targetLanguageCode);
+            translatedText = await translateText(originalText, sourceForTranslate, targetLanguageCode);
             if (translatedText) {
               console.log("[SarvamProxy] Translation result:", translatedText);
             }
