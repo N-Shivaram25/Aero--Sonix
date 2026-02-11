@@ -189,6 +189,19 @@ const setupDeepgramWsProxy = (server) => {
       }
     });
 
+    dgWs.on("unexpected-response", (req, res) => {
+      try {
+        clientWs.send(
+          JSON.stringify({
+            type: "error",
+            message: `Deepgram unexpected response: ${res?.statusCode || "unknown"}`,
+          })
+        );
+      } catch {
+      }
+      cleanup(`Deepgram unexpected response (${res?.statusCode || "unknown"})`);
+    });
+
     dgWs.on("close", (code, reason) => {
       const msg = reason ? reason.toString() : "Deepgram socket closed";
       cleanup(`${msg} (${code || "no_code"})`);

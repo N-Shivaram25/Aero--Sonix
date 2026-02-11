@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
@@ -146,6 +146,13 @@ const CallContent = () => {
   const [spokenLanguage, setSpokenLanguage] = useState("english");
   const [captions, setCaptions] = useState([]);
 
+  const pushCaption = useCallback((c) => {
+    setCaptions((prev) => {
+      const next = [...prev, c];
+      return next.length > 8 ? next.slice(next.length - 8) : next;
+    });
+  }, []);
+
   useEffect(() => {
     if (callingState === CallingState.LEFT) {
       navigate("/");
@@ -162,12 +169,7 @@ const CallContent = () => {
         setCaptionsEnabled={setCaptionsEnabled}
         spokenLanguage={spokenLanguage}
         setSpokenLanguage={setSpokenLanguage}
-        pushCaption={(c) =>
-          setCaptions((prev) => {
-            const next = [...prev, c];
-            return next.length > 8 ? next.slice(next.length - 8) : next;
-          })
-        }
+        pushCaption={pushCaption}
       />
       <div className="w-full h-[100dvh] flex flex-col">
         <div className="flex-1 min-h-0">
