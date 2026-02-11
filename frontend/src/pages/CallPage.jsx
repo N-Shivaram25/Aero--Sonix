@@ -431,7 +431,8 @@ const CaptionControls = ({
             const transcript =
               data?.channel?.alternatives?.[0]?.transcript || // Deepgram format
               data?.channel?.alternatives?.[0]?.paragraphs?.transcript || // Deepgram paragraphs
-              data?.text || // Sarvam format
+              data?.text || // Sarvam format (old)
+              data?.original_text || // Sarvam format (new - original text)
               "";
 
             if (!String(transcript || "").trim()) return;
@@ -442,10 +443,38 @@ const CaptionControls = ({
               data?.type === "Results" ||
               data?.is_final === true; // Sarvam format
 
-            interimRef.current = String(transcript || "");
-
-            if (isFinal) {
-              flushInterimAsLine();
+            // Handle dual captions (original + translation)
+            if (data?.original_text && data?.translated_text) {
+              // Send original text
+              interimRef.current = String(data.original_text || "");
+              if (isFinal) {
+                pushCaption({
+                  id: Date.now().toString(),
+                  speaker: authUser?.fullName || "You",
+                  text: data.original_text,
+                  timestamp: new Date().toISOString(),
+                  type: "original"
+                });
+              }
+              
+              // Send translated text with a small delay
+              setTimeout(() => {
+                if (data.translated_text) {
+                  pushCaption({
+                    id: (Date.now() + 1).toString(),
+                    speaker: authUser?.fullName || "You",
+                    text: data.translated_text,
+                    timestamp: new Date().toISOString(),
+                    type: "translation"
+                  });
+                }
+              }, 100);
+            } else {
+              // Single caption (no translation needed)
+              interimRef.current = String(transcript || "");
+              if (isFinal) {
+                flushInterimAsLine();
+              }
             }
           };
         };
@@ -611,35 +640,50 @@ const CaptionBar = ({
   const list = Array.isArray(captions) ? captions : [];
 
   return (
-    <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-30 w-full max-w-2xl px-4">
+    <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-30 w-full max-w-3xl px-4">
       <div className="bg-base-100/95 backdrop-blur-md rounded-2xl border-2 border-primary/30 shadow-2xl p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 bg-success rounded-full animate-pulse"></div>
-            <span className="text-sm font-bold text-primary">Live Transcription</span>
+            <span className="text-sm font-bold text-primary">Live Captions with Translation</span>
           </div>
           <span className="text-xs text-base-content/60">
             {list.length} {list.length === 1 ? 'line' : 'lines'}
           </span>
         </div>
         
-        <div className="space-y-2 min-h-[60px] max-h-[200px] overflow-y-auto">
+        <div className="space-y-2 min-h-[80px] max-h-[300px] overflow-y-auto">
           {list.length ? (
             list.slice(-5).map((c, index) => (
               <div 
                 key={c.id} 
-                className={`flex items-start gap-3 p-3 rounded-lg bg-base-200/50 border border-base-300/50 ${
+                className={`p-3 rounded-lg border ${
+                  c.type === 'translation' 
+                    ? 'bg-info/10 border-info/30' 
+                    : 'bg-base-200/50 border-base-300/50'
+                } ${
                   index === list.slice(-5).length - 1 ? 'ring-2 ring-primary/20' : ''
                 }`}
               >
-                {c.speaker ? (
-                  <span className="text-xs font-bold text-primary uppercase tracking-wide">
-                    {c.speaker}:
+                <div className="flex items-start gap-2">
+                  {c.speaker ? (
+                    <span className={`text-xs font-bold uppercase tracking-wide ${
+                      c.type === 'translation' ? 'text-info' : 'text-primary'
+                    }`}>
+                      {c.speaker}
+                      {c.type === 'translation' && (
+                        <span className="ml-1 text-xs opacity-70">(Translation)</span>
+                      )}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-1">
+                  <span className={`text-sm leading-relaxed ${
+                    c.type === 'translation' ? 'text-info font-medium' : 'text-base-content'
+                  }`}>
+                    {c.text}
                   </span>
-                ) : null}
-                <span className="text-sm text-base-content leading-relaxed flex-1">
-                  {c.text}
-                </span>
+                </div>
               </div>
             ))
           ) : (
@@ -650,6 +694,19 @@ const CaptionBar = ({
               </div>
             </div>
           )}
+        </div>
+        
+        <div className="mt-3 pt-2 border-t border-base-300/50">
+          <div className="flex items-center justify-center gap-4 text-xs text-base-content/60">
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 bg-primary rounded-full"></div>
+              <span>Original</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 bg-info rounded-full"></div>
+              <span>Translation</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
