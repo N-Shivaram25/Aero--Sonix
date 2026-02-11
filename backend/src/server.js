@@ -141,164 +141,148 @@ const setupDeepgramWsProxy = (server) => {
   });
 
   wss.on("connection", async (clientWs) => {
-    console.log("[DeepgramProxy] client connected");
-    const apiKey = process.env.DEEPGRAM_API_KEY;
+    console.log("[SarvamProxy] client connected");
+    // Check for Sarvam API key
+    const apiKey = process.env.SARVAM_API_KEY;
     if (!apiKey) {
+      console.log("[SarvamProxy] SARVAM_API_KEY is not set");
       try {
-        clientWs.send(JSON.stringify({ type: "error", message: "DEEPGRAM_API_KEY is not set" }));
+        clientWs.send(JSON.stringify({ type: "error", message: "SARVAM_API_KEY is not set" }));
       } catch {
       }
-      try {
-        clientWs.close(1011, "DEEPGRAM_API_KEY is not set");
-      } catch {
-      }
+      clientWs.close(1011, "SARVAM_API_KEY is not set");
       return;
     }
 
-    const url = clientWs.deepgramUrl;
+    const url = clientWs.sarvamUrl;
     const language = (url?.searchParams?.get("language") || "en").trim();
     const wantsAutoLang = language.toLowerCase() === "auto";
 
-    const dgUrl =
-      `wss://api.deepgram.com/v1/listen?model=general` +
-      `&punctuate=true&smart_format=true&interim_results=true` +
-      (wantsAutoLang ? `&detect_language=true` : `&language=${encodeURIComponent(language)}`) +
-      `&encoding=linear16&sample_rate=16000&channels=1`;
+    // Map language codes to Sarvam format
+    const languageMap = {
+      'en': 'en-IN',
+      'te': 'te-IN',
+      'hi': 'hi-IN',
+      'ta': 'ta-IN',
+      'kn': 'kn-IN',
+      'ml': 'ml-IN',
+      'pa': 'pa-IN',
+      'gu': 'gu-IN',
+      'mr': 'mr-IN',
+      'bn': 'bn-IN',
+      'or': 'or-IN',
+      'as': 'as-IN'
+    };
+    const sarvamLanguage = languageMap[language] || 'en-IN';
 
-    console.log("[DeepgramProxy] Connecting to Deepgram with URL:", dgUrl.replace(/token=[^&]*/, "token=REDACTED"));
-    const dgWs = new WebSocket(dgUrl, {
+    const sarvamUrl = `wss://api.sarvam.ai/speech-to-text-translate/ws?model=saaras:v3&mode=transcribe&language_code=${sarvamLanguage}&sample_rate=16000&input_audio_codec=pcm_s16le&high_vad_sensitivity=true&vad_signals=true`;
+
+    console.log("[SarvamProxy] Connecting to Sarvam with URL:", sarvamUrl);
+    const sarvamWs = new WebSocket(sarvamUrl, {
       headers: {
-        Authorization: `Token ${apiKey}`,
+        'Api-Subscription-Key': apiKey,
       },
     });
 
-    let dgOpened = false;
+    let sarvamOpened = false;
     const pendingChunks = [];
     const maxPendingChunks = 60;
 
     const openTimeout = setTimeout(() => {
-      if (dgOpened) return;
-      console.log("[DeepgramProxy] deepgram connection timeout");
+      if (sarvamOpened) return;
+      console.log("[SarvamProxy] sarvam connection timeout");
       try {
-        clientWs.send(JSON.stringify({ type: "error", message: "Deepgram connection timeout" }));
+        clientWs.send(JSON.stringify({ type: "error", message: "Sarvam connection timeout" }));
       } catch {
       }
-      cleanup("Deepgram connection timeout");
+      cleanup("Sarvam connection timeout");
     }, 8000);
 
     let closed = false;
     const cleanup = (reason) => {
       if (closed) return;
       closed = true;
-      console.log("[DeepgramProxy] cleanup", reason || "(no reason)");
+      console.log("[SarvamProxy] cleanup", reason || "(no reason)");
       try {
         clearTimeout(openTimeout);
       } catch {
       }
       try {
-        dgWs.close();
+        sarvamWs.close();
       } catch {
       }
       try {
-        clientWs.close(1011, reason || "Deepgram connection closed");
+        clientWs.close(1011, reason || "Sarvam connection closed");
       } catch {
       }
     };
 
-    dgWs.on("open", () => {
-      dgOpened = true;
-      console.log("[DeepgramProxy] deepgram socket open");
+    sarvamWs.on("open", () => {
+      sarvamOpened = true;
+      console.log("[SarvamProxy] sarvam socket open");
       try {
         clearTimeout(openTimeout);
       } catch {
       }
       
-      // Send a small silence chunk to test the connection
-      const silenceChunk = Buffer.alloc(1024); // 1024 bytes of silence
+      // Send initial config message
       try {
-        dgWs.send(silenceChunk);
-        console.log("[DeepgramProxy] Sent initial silence chunk");
+        sarvamWs.send(JSON.stringify({
+          type: "config",
+          prompt: ""
+        }));
+        console.log("[SarvamProxy] Sent initial config message");
       } catch (error) {
-        console.error("[DeepgramProxy] Failed to send silence chunk:", error);
+        console.error("[SarvamProxy] Failed to send config message:", error);
       }
       
-      while (pendingChunks.length && dgWs.readyState === WebSocket.OPEN) {
+      // Send any pending chunks
+      while (pendingChunks.length && sarvamWs.readyState === WebSocket.OPEN) {
         const chunk = pendingChunks.shift();
+        const base64Audio = chunk.toString('base64');
         try {
-          dgWs.send(chunk);
+          sarvamWs.send(JSON.stringify({
+            audio: {
+              data: base64Audio,
+              sample_rate: 16000,
+              encoding: "audio/wav"
+            }
+          }));
         } catch {
-          cleanup("Failed to flush audio to Deepgram");
+          cleanup("Failed to flush audio to Sarvam");
           break;
         }
       }
     });
 
-    dgWs.on("message", (data) => {
+    sarvamWs.on("message", (data) => {
       if (closed) return;
       try {
-        clientWs.send(data);
-      } catch {
-        cleanup();
-      }
-    });
-
-    dgWs.on("unexpected-response", (req, res) => {
-      const dgRequestId = res?.headers?.["dg-request-id"];
-      const dgError = res?.headers?.["dg-error"];
-      console.log(
-        "[DeepgramProxy] deepgram unexpected-response",
-        res?.statusCode,
-        "dg-request-id:",
-        dgRequestId,
-        "dg-error:",
-        dgError
-      );
-
-      try {
-        let body = "";
-        res.on("data", (chunk) => {
-          body += chunk.toString("utf8");
-        });
-        res.on("end", () => {
-          if (body) console.log("[DeepgramProxy] deepgram unexpected-response body", body);
-
-          try {
-            clientWs.send(
-              JSON.stringify({
-                type: "error",
-                message: `Deepgram unexpected response: ${res?.statusCode || "unknown"}${dgError ? ` (${dgError})` : ""}`,
-              })
-            );
-          } catch {
-          }
-
-          cleanup(`Deepgram unexpected response (${res?.statusCode || "unknown"})`);
-        });
-      } catch {
-      }
-
-      if (!res?.on) {
-        try {
-          clientWs.send(
-            JSON.stringify({
-              type: "error",
-              message: `Deepgram unexpected response: ${res?.statusCode || "unknown"}${dgError ? ` (${dgError})` : ""}`,
-            })
-          );
-        } catch {
+        const message = JSON.parse(data.toString());
+        console.log("[SarvamProxy] Received message:", message);
+        
+        // Forward transcript messages to client
+        if (message.type === 'transcript' && message.data?.transcript) {
+          clientWs.send(JSON.stringify({
+            type: 'transcript',
+            text: message.data.transcript,
+            is_final: true
+          }));
         }
-        cleanup(`Deepgram unexpected response (${res?.statusCode || "unknown"})`);
+      } catch (error) {
+        console.error("[SarvamProxy] Error processing message:", error);
       }
     });
 
-    dgWs.on("close", (code, reason) => {
-      const msg = reason ? reason.toString() : "Deepgram socket closed";
-      console.log("[DeepgramProxy] deepgram socket close", code, msg);
+    sarvamWs.on("close", (code, reason) => {
+      const msg = reason ? reason.toString() : "Sarvam socket closed";
+      console.log("[SarvamProxy] sarvam socket close", code, msg);
       cleanup(`${msg} (${code || "no_code"})`);
     });
-    dgWs.on("error", (err) => {
-      console.log("[DeepgramProxy] deepgram socket error", err?.message || err);
-      cleanup("Deepgram socket error");
+    
+    sarvamWs.on("error", (err) => {
+      console.log("[SarvamProxy] sarvam socket error", err?.message || err);
+      cleanup("Sarvam socket error");
     });
 
     let gotAnyAudio = false;
@@ -307,37 +291,46 @@ const setupDeepgramWsProxy = (server) => {
       if (closed) return;
       if (!gotAnyAudio) {
         gotAnyAudio = true;
-        console.log("[DeepgramProxy] first audio chunk", typeof chunk, chunk?.length, chunk.constructor.name);
+        console.log("[SarvamProxy] first audio chunk", typeof chunk, chunk?.length, chunk.constructor.name);
       }
       audioChunkCount++;
       
       // Log every 100 chunks to track data flow
       if (audioChunkCount % 100 === 0) {
-        console.log("[DeepgramProxy] Processed audio chunk #" + audioChunkCount + ", size: " + chunk?.length + ", DG ready: " + (dgWs.readyState === WebSocket.OPEN));
+        console.log("[SarvamProxy] Processed audio chunk #" + audioChunkCount + ", size: " + chunk?.length + ", Sarvam ready: " + (sarvamWs.readyState === WebSocket.OPEN));
       }
       
-      if (dgWs.readyState !== WebSocket.OPEN) {
+      if (sarvamWs.readyState !== WebSocket.OPEN) {
         if (pendingChunks.length < maxPendingChunks) {
           pendingChunks.push(chunk);
-          console.log("[DeepgramProxy] Queued chunk, pending:", pendingChunks.length);
+          console.log("[SarvamProxy] Queued chunk, pending:", pendingChunks.length);
         }
         return;
       }
+      
       try {
-        dgWs.send(chunk);
+        // Convert PCM chunk to base64 and send as Sarvam audio message
+        const base64Audio = chunk.toString('base64');
+        sarvamWs.send(JSON.stringify({
+          audio: {
+            data: base64Audio,
+            sample_rate: 16000,
+            encoding: "audio/wav"
+          }
+        }));
       } catch (error) {
-        console.error("[DeepgramProxy] Failed to forward audio to Deepgram:", error);
-        cleanup("Failed to forward audio to Deepgram");
+        console.error("[SarvamProxy] Failed to forward audio to Sarvam:", error);
+        cleanup("Failed to forward audio to Sarvam");
       }
     });
 
     clientWs.on("close", (code, reason) => {
       const msg = reason ? reason.toString() : "Client disconnected";
-      console.log("[DeepgramProxy] client close", code, msg);
+      console.log("[SarvamProxy] client close", code, msg);
       cleanup(msg);
     });
     clientWs.on("error", (err) => {
-      console.log("[DeepgramProxy] client socket error", err?.message || err);
+      console.log("[SarvamProxy] client socket error", err?.message || err);
       cleanup("Client socket error");
     });
   });
