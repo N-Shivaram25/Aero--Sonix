@@ -144,7 +144,9 @@ const CallContent = () => {
 
   const [captionsEnabled, setCaptionsEnabled] = useState(false);
   const [spokenLanguage, setSpokenLanguage] = useState("english");
+  const [targetLanguage, setTargetLanguage] = useState("english");
   const [captions, setCaptions] = useState([]);
+  const [captionMeta, setCaptionMeta] = useState(null);
 
   const pushCaption = useCallback((c) => {
     setCaptions((prev) => {
@@ -169,13 +171,16 @@ const CallContent = () => {
         setCaptionsEnabled={setCaptionsEnabled}
         spokenLanguage={spokenLanguage}
         setSpokenLanguage={setSpokenLanguage}
+        targetLanguage={targetLanguage}
+        setTargetLanguage={setTargetLanguage}
         pushCaption={pushCaption}
+        setCaptionMeta={setCaptionMeta}
       />
       <div className="w-full h-[100dvh] flex flex-col">
         <div className="flex-1 min-h-0">
           <SpeakerLayout />
         </div>
-        {captionsEnabled ? <CaptionBar captions={captions} /> : null}
+        {captionsEnabled ? <CaptionBar captions={captions} meta={captionMeta} /> : null}
         <CallControls />
       </div>
     </StreamTheme>
@@ -188,7 +193,10 @@ const CaptionControls = ({
   setCaptionsEnabled,
   spokenLanguage,
   setSpokenLanguage,
+  targetLanguage,
+  setTargetLanguage,
   pushCaption,
+  setCaptionMeta,
 }) => {
   const { useParticipants } = useCallStateHooks();
   const participants = useParticipants();
@@ -317,7 +325,7 @@ const CaptionControls = ({
       ? origin.replace(/^https:\/\//, "wss://")
       : origin.replace(/^http:\/\//, "ws://");
 
-    const wsUrl = `${wsOrigin}/ws/gladia?token=${encodeURIComponent(token)}&language=${encodeURIComponent(spokenLanguage)}&target_language=${encodeURIComponent(spokenLanguage)}`;
+    const wsUrl = `${wsOrigin}/ws/google-cloud?token=${encodeURIComponent(token)}&language=${encodeURIComponent(spokenLanguage)}&target_language=${encodeURIComponent(targetLanguage)}`;
 
     let stopped = false;
 
@@ -382,10 +390,9 @@ const CaptionControls = ({
         if (stopped) return;
         micStreamRef.current = stream;
 
-        const ws = new WebSocket(wsUrl);
-        socketRef.current = ws;
         let reconnectAttempts = 0;
         const maxReconnectAttempts = 3;
+        let fatalWsError = false;
 
         const connectWebSocket = () => {
           if (reconnectAttempts >= maxReconnectAttempts || stopped) return;
@@ -394,25 +401,36 @@ const CaptionControls = ({
           socketRef.current = newWs;
           
           newWs.onopen = () => {
-            console.log("[Captions] WS open");
+            console.log("[Captions] Google Cloud WS open");
             reconnectAttempts = 0; // Reset on successful connection
+            toast.success("Live captions connected");
           };
 
           newWs.onclose = (e) => {
-            console.log("[Captions] WS close", e?.code, e?.reason);
+            console.log("[Captions] Google Cloud WS close", e?.code, e?.reason);
+            
+            // Show appropriate messages based on close code
+            if (e?.code === 1000) {
+              toast("Live captions disconnected");
+            } else if (e?.code === 1011) {
+              toast.error("Live captions error: " + (e?.reason || "Unknown error"));
+            } else {
+              toast.error("Live captions connection lost");
+            }
             
             // Attempt to reconnect if it's an abnormal closure and we haven't exceeded attempts
-            if (e?.code !== 1000 && reconnectAttempts < maxReconnectAttempts && !stopped) {
+            if (!fatalWsError && e?.code !== 1000 && reconnectAttempts < maxReconnectAttempts && !stopped) {
               reconnectAttempts++;
               console.log(`[Captions] Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts})`);
+              toast(`Reconnecting... (${reconnectAttempts}/${maxReconnectAttempts})`);
               setTimeout(connectWebSocket, 1000 * reconnectAttempts); // Exponential backoff
             }
           };
 
           newWs.onerror = (e) => {
-            console.log("[Captions] WS error", e);
+            console.error("[Captions] Google Cloud WS error", e);
             if (reconnectAttempts === 0) { // Only show toast on first error
-              toast.error("Captions: WebSocket connection failed");
+              toast.error("Failed to connect to live captions");
             }
           };
 
@@ -427,11 +445,52 @@ const CaptionControls = ({
               return;
             }
 
-            console.log("[Captions] Received WS message:", JSON.stringify(data, null, 2));
+            console.log("[Captions] Received Google Cloud WS message:", JSON.stringify(data, null, 2));
 
-            // Handle Gladia message format
+            if (data?.type === "meta") {
+              try {
+                setCaptionMeta?.({
+                  speaker_profile_language_raw: data?.speaker_profile_language_raw,
+                  target_language_raw: data?.target_language_raw,
+                });
+              } catch {
+              }
+              return;
+            }
+
+            if (data?.type === "error") {
+              const msg = String(data?.message || "");
+              console.error('[Captions] Google Cloud error received:', msg);
+              
+              // Handle specific error types
+              if (msg.includes('GOOGLE_CLOUD_API_KEY')) {
+                toast.error("Google Cloud API key not configured");
+                fatalWsError = true;
+              } else if (msg.includes('quota') || msg.includes('limit')) {
+                toast.error("Google Cloud quota exceeded");
+                fatalWsError = true;
+              } else if (msg.includes('Recognition error')) {
+                toast.error("Speech recognition error");
+              } else {
+                toast.error(`Captions error: ${msg}`);
+              }
+              
+              if (fatalWsError) {
+                try {
+                  newWs.close(1000, "Fatal error");
+                } catch {
+                }
+                try {
+                  setCaptionsEnabled(false);
+                } catch {
+                }
+              }
+              return;
+            }
+
+            // Handle Google Cloud message format
             const transcript =
-              data?.original_text || // Gladia format (original text)
+              data?.original_text || // Google Cloud format (original text)
               data?.channel?.alternatives?.[0]?.transcript || // Deepgram format
               data?.channel?.alternatives?.[0]?.paragraphs?.transcript || // Deepgram paragraphs
               data?.text || // Sarvam format (old)
@@ -622,17 +681,17 @@ const CaptionControls = ({
 
       interimRef.current = "";
     };
-  }, [authUser?.fullName, call, captionsEnabled, pushCaption, setCaptionsEnabled, spokenLanguage]);
+  }, [authUser?.fullName, call, captionsEnabled, pushCaption, setCaptionsEnabled, spokenLanguage, targetLanguage]);
 
   return (
-    <div className="absolute top-4 right-4 z-20 flex flex-col gap-3 bg-base-100/95 backdrop-blur-md rounded-2xl border-2 border-primary/20 shadow-xl p-4 min-w-[280px]">
+    <div className="absolute top-4 right-4 z-20 flex flex-col gap-3 bg-base-100/95 backdrop-blur-md rounded-2xl border-2 border-primary/20 shadow-xl p-4 min-w-[320px]">
       <div className="flex items-center justify-between">
         <div className="text-sm font-bold text-primary">Live Captions</div>
         <div className={`w-2 h-2 rounded-full ${captionsEnabled ? "bg-success animate-pulse" : "bg-error"}`}></div>
       </div>
       
       <div className="flex items-center gap-2">
-        <span className="text-xs font-medium text-base-content/70">Language:</span>
+        <span className="text-xs font-medium text-base-content/70">Your Language:</span>
         <select
           className="select select-bordered select-sm select-primary flex-1"
           value={spokenLanguage}
@@ -640,6 +699,21 @@ const CaptionControls = ({
         >
           {LANGUAGES.map((lang) => (
             <option key={`spoken-${lang}`} value={lang.toLowerCase()}>
+              {lang}
+            </option>
+          ))}
+        </select>
+      </div>
+      
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium text-base-content/70">Translate To:</span>
+        <select
+          className="select select-bordered select-sm select-info flex-1"
+          value={targetLanguage}
+          onChange={(e) => setTargetLanguage(e.target.value)}
+        >
+          {LANGUAGES.map((lang) => (
+            <option key={`target-${lang}`} value={lang.toLowerCase()}>
               {lang}
             </option>
           ))}
@@ -665,6 +739,7 @@ const CaptionControls = ({
 
 const CaptionBar = ({
   captions,
+  meta,
 }) => {
   const list = Array.isArray(captions) ? captions : [];
 
@@ -711,8 +786,14 @@ const CaptionBar = ({
 
   // Get the latest caption to extract language info
   const latestCaption = list[list.length - 1];
-  const speakerLang = latestCaption?.speaker_profile_language_raw || "Unknown";
-  const targetLang = latestCaption?.target_language_raw || "Unknown";
+  const speakerLang =
+    latestCaption?.speaker_profile_language_raw ||
+    meta?.speaker_profile_language_raw ||
+    "Unknown";
+  const targetLang =
+    latestCaption?.target_language_raw ||
+    meta?.target_language_raw ||
+    "Unknown";
 
   return (
     <div className="w-full px-4 pb-2">

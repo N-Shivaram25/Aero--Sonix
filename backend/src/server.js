@@ -19,71 +19,7 @@ import aiRobotRoutes from "./routes/aiRobot.route.js";
 import { connectDB } from "./lib/db.js";
 import User from "./models/User.js";
 
-// Gladia language mapping
-const gladiaLanguageMap = {
-  'en': 'en',
-  'te': 'te',
-  'hi': 'hi',
-  'ta': 'ta',
-  'kn': 'kn',
-  'ml': 'ml',
-  'pa': 'pa',
-  'gu': 'gu',
-  'mr': 'mr',
-  'bn': 'bn',
-  'or': 'or',
-  'as': 'as',
-  'ur': 'ur',
-  'ne': 'ne',
-  'sa': 'sa',
-  'fr': 'fr',
-  'es': 'es',
-  'de': 'de',
-  'it': 'it',
-  'pt': 'pt',
-  'ru': 'ru',
-  'zh': 'zh',
-  'ja': 'ja',
-  'ko': 'ko',
-  'ar': 'ar'
-};
-
-// Normalize Gladia language codes
-const normalizeGladiaLanguageCode = (value) => {
-  const v = String(value || "").trim().toLowerCase();
-  if (!v) return null;
-  // Handle common variations
-  if (v === 'english' || v === 'en') return 'en';
-  if (v === 'telugu' || v === 'te') return 'te';
-  if (v === 'hindi' || v === 'hi') return 'hi';
-  if (v === 'tamil' || v === 'ta') return 'ta';
-  if (v === 'kannada' || v === 'kn') return 'kn';
-  if (v === 'malayalam' || v === 'ml') return 'ml';
-  if (v === 'punjabi' || v === 'pa') return 'pa';
-  if (v === 'gujarati' || v === 'gu') return 'gu';
-  if (v === 'marathi' || v === 'mr') return 'mr';
-  if (v === 'bengali' || v === 'bn') return 'bn';
-  if (v === 'odia' || v === 'or') return 'or';
-  if (v === 'assamese' || v === 'as') return 'as';
-  if (v === 'urdu' || v === 'ur') return 'ur';
-  if (v === 'nepali' || v === 'ne') return 'ne';
-  if (v === 'sanskrit' || v === 'sa') return 'sa';
-  if (v === 'french' || v === 'fr') return 'fr';
-  if (v === 'spanish' || v === 'es') return 'es';
-  if (v === 'german' || v === 'de') return 'de';
-  if (v === 'italian' || v === 'it') return 'it';
-  if (v === 'portuguese' || v === 'pt') return 'pt';
-  if (v === 'russian' || v === 'ru') return 'ru';
-  if (v === 'chinese' || v === 'zh') return 'zh';
-  if (v === 'japanese' || v === 'ja') return 'ja';
-  if (v === 'korean' || v === 'ko') return 'ko';
-  if (v === 'arabic' || v === 'ar') return 'ar';
-  
-  // Return as-is if it's already a valid 2-letter code
-  if (/^[a-z]{2}$/.test(v)) return v;
-  
-  return null;
-};
+import { GoogleCloudSTT, GoogleCloudTranslation, normalizeLanguageCode } from "./lib/googleCloud.js";
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -180,13 +116,13 @@ const getUserFromToken = async (token) => {
   }
 };
 
-const setupGladiaWsProxy = (server) => {
+const setupGoogleCloudWsProxy = (server) => {
   const wss = new WebSocketServer({ noServer: true });
 
   server.on("upgrade", async (req, socket, head) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host}`);
-      if (url.pathname !== "/ws/gladia") return;
+      if (url.pathname !== "/ws/google-cloud") return;
 
       const token = url.searchParams.get("token") || "";
       const user = await getUserFromToken(token);
@@ -207,214 +143,202 @@ const setupGladiaWsProxy = (server) => {
   });
 
   wss.on("connection", async (clientWs) => {
-    console.log("[GladiaProxy] client connected");
+    console.log("[GoogleCloudProxy] client connected");
     
     // Get current user's profile language (this is the speaker)
     const speaker = clientWs.user;
     const speakerLanguageRaw = speaker?.profileLanguage || 'english';
-    const speakerLanguageCode = normalizeGladiaLanguageCode(speakerLanguageRaw) || 'en';
+    const speakerLanguageCode = normalizeLanguageCode(speakerLanguageRaw) || 'en';
     
-    console.log("[GladiaProxy] Speaker profile language:", speakerLanguageRaw, "->", speakerLanguageCode);
+    console.log("[GoogleCloudProxy] Speaker profile language:", speakerLanguageRaw, "->", speakerLanguageCode);
     
-    // Check for Gladia API key
-    const apiKey = process.env.GLADIA_API_KEY;
+    // Check for Google Cloud API key
+    const apiKey = process.env.GOOGLE_CLOUD_API_KEY;
     if (!apiKey) {
-      console.log("[GladiaProxy] GLADIA_API_KEY is not set");
+      console.log("[GoogleCloudProxy] GOOGLE_CLOUD_API_KEY is not set");
       try {
-        clientWs.send(JSON.stringify({ type: "error", message: "GLADIA_API_KEY is not set" }));
+        clientWs.send(JSON.stringify({ type: "error", message: "GOOGLE_CLOUD_API_KEY is not set" }));
       } catch {
       }
-      clientWs.close(1011, "GLADIA_API_KEY is not set");
+      clientWs.close(1011, "GOOGLE_CLOUD_API_KEY is not set");
       return;
     }
 
     const url = clientWs.gladiaUrl;
     const targetLanguageRaw = (url?.searchParams?.get("target_language") || url?.searchParams?.get("targetLanguage") || "english").trim();
-    const targetLanguageCode = normalizeGladiaLanguageCode(targetLanguageRaw) || 'en';
+    const targetLanguageCode = normalizeLanguageCode(targetLanguageRaw) || 'en';
     
-    console.log("[GladiaProxy] Target language for translation:", targetLanguageRaw, "->", targetLanguageCode);
+    console.log("[GoogleCloudProxy] Target language for translation:", targetLanguageRaw, "->", targetLanguageCode);
 
-    // Step 1: Initialize Gladia session
-    let gladiaWsUrl = null;
-    let sessionId = null;
     try {
-      const response = await fetch("https://api.gladia.io/v2/live", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-gladia-key": apiKey,
-        },
-        body: JSON.stringify({
-          encoding: "wav/pcm",
-          sample_rate: 16000,
-          bit_depth: 16,
-          channels: 1,
-          language_config: {
-            languages: [speakerLanguageCode],
-            code_switching: false
-          },
-          realtime_processing: {
-            translation: true,
-            translation_config: {
-              target_languages: [targetLanguageCode],
-              model: "base",
-              match_original_utterances: true,
-              context_adaptation: true,
-              informal: false
-            }
-          },
-          messages_config: {
-            receive_final_transcripts: true,
-            receive_realtime_processing_events: true
-          }
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("[GladiaProxy] Failed to initialize session:", response.status, errorText);
-        clientWs.send(JSON.stringify({ type: "error", message: `Gladia session init failed: ${errorText}` }));
-        clientWs.close(1011, "Gladia session init failed");
-        return;
-      }
-
-      const sessionData = await response.json();
-      gladiaWsUrl = sessionData.url;
-      sessionId = sessionData.id;
-      console.log("[GladiaProxy] Session initialized:", sessionId);
-    } catch (error) {
-      console.error("[GladiaProxy] Error initializing session:", error);
-      clientWs.send(JSON.stringify({ type: "error", message: "Gladia session init error" }));
-      clientWs.close(1011, "Gladia session init error");
-      return;
+      clientWs.send(
+        JSON.stringify({
+          type: "meta",
+          speaker_profile_language: speakerLanguageCode,
+          speaker_profile_language_raw: speakerLanguageRaw,
+          target_language: targetLanguageCode,
+          target_language_raw: targetLanguageRaw,
+        })
+      );
+    } catch {
     }
 
-    // Step 2: Connect to Gladia WebSocket
-    const gladiaWs = new WebSocket(gladiaWsUrl);
-
-    const translationByUtteranceId = new Map();
-
-    const extractTranslationText = (msg, targetLang) => {
-      const lang = String(targetLang || "").trim().toLowerCase();
-      if (!lang) return null;
-
-      const candidates = [
-        msg?.translation,
-        msg?.data?.translation,
-        msg?.realtime_processing?.translation,
-        msg?.data?.realtime_processing?.translation,
-      ].filter(Boolean);
-
-      for (const t of candidates) {
-        const results = t?.results;
-        if (!Array.isArray(results)) continue;
-
-        const picked = results.find(
-          (r) => Array.isArray(r?.languages) && r.languages.map((x) => String(x).toLowerCase()).includes(lang)
-        );
-        const text = picked?.full_transcript;
-        if (String(text || "").trim()) return text;
-      }
-
-      return null;
-    };
-
+    // Initialize Google Cloud services
+    const sttService = new GoogleCloudSTT();
+    const translationService = new GoogleCloudTranslation();
+    
+    let audioBuffer = Buffer.alloc(0);
+    let recognizeStream = null;
     let closed = false;
+    
     const cleanup = (reason) => {
       if (closed) return;
       closed = true;
-      console.log("[GladiaProxy] cleanup", reason || "(no reason)");
+      console.log("[GoogleCloudProxy] cleanup", reason || "(no reason)");
       try {
-        gladiaWs.close();
+        if (recognizeStream) {
+          recognizeStream.destroy();
+        }
       } catch {
       }
       try {
-        clientWs.close(1011, reason || "Gladia connection closed");
+        clientWs.close(1011, reason || "Google Cloud connection closed");
       } catch {
       }
     };
 
-    gladiaWs.on("open", () => {
-      console.log("[GladiaProxy] Gladia WebSocket connected");
-    });
-
-    gladiaWs.on("message", async (data) => {
-      if (closed) return;
+    const startRecognition = () => {
+      if (closed || !sttService) return;
+      
       try {
-        const message = JSON.parse(data.toString());
-        console.log("[GladiaProxy] Received Gladia message:", JSON.stringify(message, null, 2));
+        console.log("[GoogleCloudProxy] Starting recognition stream");
         
-        // Handle transcript messages with translation
-        if (message.type === "transcript" && message.data?.utterance?.text) {
-          const originalText = message.data.utterance.text;
-          const detectedLanguage = message.data.utterance.language || speakerLanguageCode;
-          const isFinal = message.data.is_final !== false;
-          const utteranceId = message.data?.id;
-          
-          console.log("[GladiaProxy] Transcript:", originalText);
-          console.log("[GladiaProxy] Language:", detectedLanguage);
-          console.log("[GladiaProxy] Is final:", isFinal);
-          
-          // Extract translation if available (Gladia may send it inside transcript OR as separate realtime_processing events)
-          let translatedText = extractTranslationText(message, targetLanguageCode);
-          if (!translatedText && utteranceId && translationByUtteranceId.has(utteranceId)) {
-            translatedText = translationByUtteranceId.get(utteranceId);
+        const config = sttService.getSpeechConfig(speakerLanguageCode);
+        const request = {
+          config: config,
+          interimResults: true,
+          enableVoiceActivityEvents: true,
+          voiceActivityTimeout: {
+            speechStartTimeout: 2000,
+            speechEndTimeout: 2000
           }
-          if (translatedText) {
-            console.log("[GladiaProxy] Translation found:", translatedText);
-          }
-          
-          if (isFinal) {
-            const outgoing = {
-              type: 'transcript',
-              original_text: originalText,
-              original_language: speakerLanguageCode,
-              translated_text: translatedText,
-              translated_language: translatedText ? targetLanguageCode : null,
-              is_final: true,
-              language_code: detectedLanguage,
-              speaker_profile_language: speakerLanguageCode,
-              speaker_profile_language_raw: speakerLanguageRaw,
-              target_language: targetLanguageCode,
-              target_language_raw: targetLanguageRaw
-            };
-            console.log("[GladiaProxy] Sending to client:", JSON.stringify(outgoing, null, 2));
-            clientWs.send(JSON.stringify(outgoing));
-          }
-        } else if (message.type === "realtime_processing") {
-          const utteranceId = message.data?.id;
-          const translatedText = extractTranslationText(message, targetLanguageCode);
-          if (utteranceId && translatedText) {
-            translationByUtteranceId.set(utteranceId, translatedText);
-            console.log("[GladiaProxy] Cached translation for", utteranceId, ":", translatedText);
-          } else {
-            console.log("[GladiaProxy] Realtime processing event:", message);
-          }
-        } else {
-          console.log("[GladiaProxy] Unhandled message type:", message.type);
-        }
+        };
+        
+        recognizeStream = sttService.speechClient.streamingRecognize(request)
+          .on('error', (error) => {
+            console.error('[GoogleCloudProxy] Recognition stream error:', error);
+            try {
+              clientWs.send(JSON.stringify({ type: "error", message: `Recognition error: ${error.message}` }));
+            } catch {
+            }
+            // Restart recognition on error
+            if (!closed) {
+              setTimeout(startRecognition, 2000);
+            }
+          })
+          .on('data', async (data) => {
+            if (closed) return;
+            
+            try {
+              console.log('[GoogleCloudProxy] Received recognition data:', JSON.stringify(data, null, 2));
+              
+              if (data.results && data.results.length > 0) {
+                const result = data.results[0];
+                const originalText = result.alternatives[0]?.transcript || '';
+                const isFinal = result.isFinal;
+                
+                if (originalText.trim()) {
+                  console.log('[GoogleCloudProxy] Transcript:', originalText);
+                  console.log('[GoogleCloudProxy] Is final:', isFinal);
+                  
+                  let translatedText = null;
+                  
+                  // Only translate if it's a final result and target language is different
+                  if (isFinal && targetLanguageCode !== speakerLanguageCode) {
+                    try {
+                      const translation = await translationService.translateText(
+                        originalText,
+                        targetLanguageCode,
+                        speakerLanguageCode
+                      );
+                      translatedText = translation.translatedText;
+                      console.log('[GoogleCloudProxy] Translation:', translatedText);
+                    } catch (translationError) {
+                      console.error('[GoogleCloudProxy] Translation error:', translationError);
+                    }
+                  }
+                  
+                  if (isFinal) {
+                    const outgoing = {
+                      type: 'transcript',
+                      original_text: originalText,
+                      original_language: speakerLanguageCode,
+                      translated_text: translatedText,
+                      translated_language: translatedText ? targetLanguageCode : null,
+                      is_final: true,
+                      language_code: speakerLanguageCode,
+                      speaker_profile_language: speakerLanguageCode,
+                      speaker_profile_language_raw: speakerLanguageRaw,
+                      target_language: targetLanguageCode,
+                      target_language_raw: targetLanguageRaw
+                    };
+                    console.log('[GoogleCloudProxy] Sending to client:', JSON.stringify(outgoing, null, 2));
+                    clientWs.send(JSON.stringify(outgoing));
+                  }
+                }
+              }
+            } catch (error) {
+              console.error('[GoogleCloudProxy] Error processing recognition data:', error);
+            }
+          })
+          .on('end', () => {
+            console.log('[GoogleCloudProxy] Recognition stream ended');
+            if (!closed) {
+              // Restart recognition stream
+              setTimeout(startRecognition, 1000);
+            }
+          })
+          .on('close', () => {
+            console.log('[GoogleCloudProxy] Recognition stream closed');
+          });
+
       } catch (error) {
-        console.error("[GladiaProxy] Error processing message:", error);
+        console.error('[GoogleCloudProxy] Error starting recognition:', error);
+        try {
+          clientWs.send(JSON.stringify({ type: "error", message: "Failed to start recognition" }));
+        } catch {
+        }
+        // Retry after delay
+        if (!closed) {
+          setTimeout(startRecognition, 2000);
+        }
       }
-    });
+    };
 
-    gladiaWs.on("close", (code, reason) => {
-      const msg = reason ? reason.toString() : "Gladia socket closed";
-      console.log("[GladiaProxy] Gladia socket close", code, msg);
-      cleanup(`${msg} (${code || "no_code"})`);
-    });
-    
-    gladiaWs.on("error", (err) => {
-      console.log("[GladiaProxy] Gladia socket error", err?.message || err);
-      cleanup("Gladia socket error");
-    });
+    // Start recognition
+    startRecognition();
 
-    // Forward audio chunks from client to Gladia
+    // Forward audio chunks from client to recognition stream
     clientWs.on("message", (chunk) => {
       if (closed) return;
-      if (gladiaWs.readyState === WebSocket.OPEN) {
-        // Send as binary audio chunk
-        gladiaWs.send(chunk);
+      
+      try {
+        // Handle binary audio data
+        if (chunk instanceof Buffer) {
+          audioBuffer = Buffer.concat([audioBuffer, chunk]);
+          
+          // Process audio in chunks (send every 100ms of audio)
+          if (audioBuffer.length >= 3200) { // 16000 samples/sec * 2 bytes/sample * 0.1 sec
+            if (recognizeStream && recognizeStream.writable) {
+              recognizeStream.write({
+                audio: audioBuffer
+              });
+            }
+            audioBuffer = Buffer.alloc(0);
+          }
+        }
+      } catch (error) {
+        console.error('[GoogleCloudProxy] Error processing audio chunk:', error);
       }
     });
 
@@ -423,7 +347,7 @@ const setupGladiaWsProxy = (server) => {
     });
 
     clientWs.on("error", (err) => {
-      console.log("[GladiaProxy] Client socket error", err?.message || err);
+      console.log("[GoogleCloudProxy] Client socket error", err?.message || err);
       cleanup("Client socket error");
     });
   });
@@ -452,7 +376,7 @@ const __filename = fileURLToPath(import.meta.url);
 // If the file is executed directly (node src/server.js, nodemon, etc.) start the server.
 if (process.argv[1] === __filename) {
   const server = http.createServer(app);
-  setupGladiaWsProxy(server);
+  setupGoogleCloudWsProxy(server);
   server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
   });
