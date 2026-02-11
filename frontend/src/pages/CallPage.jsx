@@ -503,7 +503,7 @@ const CaptionControls = ({
             
             // Log every 50 chunks (approximately every 2 seconds)
             if (audioChunkCount % 50 === 0) {
-              console.log("[Captions] Sent audio chunk #" + audioChunkCount + ", size: " + pcm16.byteLength + ", hasAudio: " + hasAudio);
+              console.log("[Captions] Sent audio chunk #" + audioChunkCount + ", size: " + pcm16.byteLength + ", hasAudio: " + hasAudio + ", type: " + pcm16.constructor.name);
             }
           } catch (error) {
             console.error("[Captions] Error sending audio:", error);

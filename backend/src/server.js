@@ -160,11 +160,12 @@ const setupDeepgramWsProxy = (server) => {
     const wantsAutoLang = language.toLowerCase() === "auto";
 
     const dgUrl =
-      `wss://api.deepgram.com/v1/listen?model=nova-3&punctuate=true&smart_format=true` +
-      `&interim_results=true` +
+      `wss://api.deepgram.com/v1/listen?model=nova-2&punctuate=true&smart_format=true` +
+      `&interim_results=true&utterance_end=true` +
       (wantsAutoLang ? `&detect_language=true` : `&language=${encodeURIComponent(language)}`) +
-      `&encoding=linear16&sample_rate=16000&channels=1`;
+      `&encoding=linear16&sample_rate=16000&channels=1&endpointing=200`;
 
+    console.log("[DeepgramProxy] Connecting to Deepgram with URL:", dgUrl.replace(/token=[^&]*/, "token=REDACTED"));
     const dgWs = new WebSocket(dgUrl, ["token", apiKey]);
 
     let dgOpened = false;
@@ -207,6 +208,16 @@ const setupDeepgramWsProxy = (server) => {
         clearTimeout(openTimeout);
       } catch {
       }
+      
+      // Send a small silence chunk to test the connection
+      const silenceChunk = new ArrayBuffer(1024); // 1024 bytes of silence
+      try {
+        dgWs.send(silenceChunk);
+        console.log("[DeepgramProxy] Sent initial silence chunk");
+      } catch (error) {
+        console.error("[DeepgramProxy] Failed to send silence chunk:", error);
+      }
+      
       while (pendingChunks.length && dgWs.readyState === WebSocket.OPEN) {
         const chunk = pendingChunks.shift();
         try {
@@ -252,19 +263,31 @@ const setupDeepgramWsProxy = (server) => {
     });
 
     let gotAnyAudio = false;
+    let audioChunkCount = 0;
     clientWs.on("message", (chunk) => {
       if (closed) return;
       if (!gotAnyAudio) {
         gotAnyAudio = true;
-        console.log("[DeepgramProxy] first audio chunk", typeof chunk, chunk?.length);
+        console.log("[DeepgramProxy] first audio chunk", typeof chunk, chunk?.length, chunk.constructor.name);
       }
+      audioChunkCount++;
+      
+      // Log every 100 chunks to track data flow
+      if (audioChunkCount % 100 === 0) {
+        console.log("[DeepgramProxy] Processed audio chunk #" + audioChunkCount + ", size: " + chunk?.length + ", DG ready: " + (dgWs.readyState === WebSocket.OPEN));
+      }
+      
       if (dgWs.readyState !== WebSocket.OPEN) {
-        if (pendingChunks.length < maxPendingChunks) pendingChunks.push(chunk);
+        if (pendingChunks.length < maxPendingChunks) {
+          pendingChunks.push(chunk);
+          console.log("[DeepgramProxy] Queued chunk, pending:", pendingChunks.length);
+        }
         return;
       }
       try {
         dgWs.send(chunk);
-      } catch {
+      } catch (error) {
+        console.error("[DeepgramProxy] Failed to forward audio to Deepgram:", error);
         cleanup("Failed to forward audio to Deepgram");
       }
     });
