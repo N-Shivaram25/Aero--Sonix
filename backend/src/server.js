@@ -160,10 +160,10 @@ const setupDeepgramWsProxy = (server) => {
     const wantsAutoLang = language.toLowerCase() === "auto";
 
     const dgUrl =
-      `wss://api.deepgram.com/v1/listen?model=nova-2&punctuate=true&smart_format=true` +
-      `&interim_results=true` +
+      `wss://api.deepgram.com/v1/listen?model=general` +
+      `&punctuate=true&smart_format=true&interim_results=true` +
       (wantsAutoLang ? `&detect_language=true` : `&language=${encodeURIComponent(language)}`) +
-      `&encoding=linear16&sample_rate=16000&channels=1&endpointing=200&utterance_end_ms=1000`;
+      `&encoding=linear16&sample_rate=16000&channels=1`;
 
     console.log("[DeepgramProxy] Connecting to Deepgram with URL:", dgUrl.replace(/token=[^&]*/, "token=REDACTED"));
     const dgWs = new WebSocket(dgUrl, {
@@ -261,20 +261,34 @@ const setupDeepgramWsProxy = (server) => {
         });
         res.on("end", () => {
           if (body) console.log("[DeepgramProxy] deepgram unexpected-response body", body);
+
+          try {
+            clientWs.send(
+              JSON.stringify({
+                type: "error",
+                message: `Deepgram unexpected response: ${res?.statusCode || "unknown"}${dgError ? ` (${dgError})` : ""}`,
+              })
+            );
+          } catch {
+          }
+
+          cleanup(`Deepgram unexpected response (${res?.statusCode || "unknown"})`);
         });
       } catch {
       }
 
-      try {
-        clientWs.send(
-          JSON.stringify({
-            type: "error",
-            message: `Deepgram unexpected response: ${res?.statusCode || "unknown"}${dgError ? ` (${dgError})` : ""}`,
-          })
-        );
-      } catch {
+      if (!res?.on) {
+        try {
+          clientWs.send(
+            JSON.stringify({
+              type: "error",
+              message: `Deepgram unexpected response: ${res?.statusCode || "unknown"}${dgError ? ` (${dgError})` : ""}`,
+            })
+          );
+        } catch {
+        }
+        cleanup(`Deepgram unexpected response (${res?.statusCode || "unknown"})`);
       }
-      cleanup(`Deepgram unexpected response (${res?.statusCode || "unknown"})`);
     });
 
     dgWs.on("close", (code, reason) => {
