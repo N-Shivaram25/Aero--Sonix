@@ -427,9 +427,11 @@ const CaptionControls = ({
               return;
             }
 
+            // Handle both Deepgram and Sarvam message formats
             const transcript =
-              data?.channel?.alternatives?.[0]?.transcript ||
-              data?.channel?.alternatives?.[0]?.paragraphs?.transcript ||
+              data?.channel?.alternatives?.[0]?.transcript || // Deepgram format
+              data?.channel?.alternatives?.[0]?.paragraphs?.transcript || // Deepgram paragraphs
+              data?.text || // Sarvam format
               "";
 
             if (!String(transcript || "").trim()) return;
@@ -437,7 +439,8 @@ const CaptionControls = ({
             const isFinal =
               data?.is_final === true ||
               data?.speech_final === true ||
-              data?.type === "Results";
+              data?.type === "Results" ||
+              data?.is_final === true; // Sarvam format
 
             interimRef.current = String(transcript || "");
 
@@ -564,12 +567,16 @@ const CaptionControls = ({
   }, [authUser?.fullName, call, captionsEnabled, pushCaption, setCaptionsEnabled, spokenLanguage]);
 
   return (
-    <div className="absolute top-4 right-4 z-20 flex flex-col gap-2 bg-base-100/80 backdrop-blur rounded-xl border border-base-300 p-3">
-      <div className="text-sm font-semibold">Captions ON/OFF (STT)</div>
+    <div className="absolute top-4 right-4 z-20 flex flex-col gap-3 bg-base-100/95 backdrop-blur-md rounded-2xl border-2 border-primary/20 shadow-xl p-4 min-w-[280px]">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-bold text-primary">Live Captions</div>
+        <div className={`w-2 h-2 rounded-full ${captionsEnabled ? "bg-success animate-pulse" : "bg-error"}`}></div>
+      </div>
+      
       <div className="flex items-center gap-2">
-        <span className="text-xs opacity-70">Language</span>
+        <span className="text-xs font-medium text-base-content/70">Language:</span>
         <select
-          className="select select-bordered select-sm"
+          className="select select-bordered select-sm select-primary flex-1"
           value={spokenLanguage}
           onChange={(e) => setSpokenLanguage(e.target.value)}
         >
@@ -580,13 +587,20 @@ const CaptionControls = ({
           ))}
         </select>
       </div>
-      <button
-        type="button"
-        className={`btn btn-sm ${captionsEnabled ? "btn-error" : "btn-success"}`}
-        onClick={() => setCaptionsEnabled((v) => !v)}
-      >
-        {captionsEnabled ? "Translation OFF" : "Translation ON"}
-      </button>
+      
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-base-content/60">
+          {captionsEnabled ? "🟢 Transcribing..." : "⚫ Inactive"}
+        </span>
+        <button
+          type="button"
+          className={`btn btn-sm btn-circle ${captionsEnabled ? "btn-error hover:btn-error" : "btn-success hover:btn-success"}`}
+          onClick={() => setCaptionsEnabled((v) => !v)}
+          title={captionsEnabled ? "Stop captions" : "Start captions"}
+        >
+          {captionsEnabled ? "⏹" : "▶"}
+        </button>
+      </div>
     </div>
   );
 };
@@ -597,22 +611,45 @@ const CaptionBar = ({
   const list = Array.isArray(captions) ? captions : [];
 
   return (
-    <div className="w-full px-4 pb-4">
-      <div className="card bg-base-100 border border-base-300">
-        <div className="card-body p-3">
-          <div className="text-xs opacity-70 mb-1">Captions</div>
-          <div className="text-sm space-y-1">
-            {list.length ? (
-              list.slice(-3).map((c) => (
-                <div key={c.id} className="w-full truncate">
-                  {c.speaker ? <span className="font-semibold mr-2">{c.speaker}:</span> : null}
-                  <span>{c.text}</span>
-                </div>
-              ))
-            ) : (
-              <div className="opacity-60">Listening…</div>
-            )}
+    <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-30 w-full max-w-2xl px-4">
+      <div className="bg-base-100/95 backdrop-blur-md rounded-2xl border-2 border-primary/30 shadow-2xl p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-success rounded-full animate-pulse"></div>
+            <span className="text-sm font-bold text-primary">Live Transcription</span>
           </div>
+          <span className="text-xs text-base-content/60">
+            {list.length} {list.length === 1 ? 'line' : 'lines'}
+          </span>
+        </div>
+        
+        <div className="space-y-2 min-h-[60px] max-h-[200px] overflow-y-auto">
+          {list.length ? (
+            list.slice(-5).map((c, index) => (
+              <div 
+                key={c.id} 
+                className={`flex items-start gap-3 p-3 rounded-lg bg-base-200/50 border border-base-300/50 ${
+                  index === list.slice(-5).length - 1 ? 'ring-2 ring-primary/20' : ''
+                }`}
+              >
+                {c.speaker ? (
+                  <span className="text-xs font-bold text-primary uppercase tracking-wide">
+                    {c.speaker}:
+                  </span>
+                ) : null}
+                <span className="text-sm text-base-content leading-relaxed flex-1">
+                  {c.text}
+                </span>
+              </div>
+            ))
+          ) : (
+            <div className="flex items-center justify-center h-16 text-base-content/60 italic">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-warning rounded-full animate-pulse"></div>
+                <span>Listening for speech...</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
