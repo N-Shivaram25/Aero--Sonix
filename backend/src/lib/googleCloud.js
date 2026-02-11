@@ -64,6 +64,11 @@ const normalizeLanguageCode = (value) => {
   const v = String(value || "").trim().toLowerCase();
   if (!v) return null;
   
+  if (/^[a-z]{2}([-_][a-z]{2})?$/.test(v)) {
+    const two = v.slice(0, 2);
+    if (/^[a-z]{2}$/.test(two)) return two;
+  }
+  
   // Handle common variations
   if (v === 'english' || v === 'en') return 'en';
   if (v === 'telugu' || v === 'te') return 'te';
@@ -99,9 +104,7 @@ const normalizeLanguageCode = (value) => {
 
 class GoogleCloudSTT {
   constructor() {
-    this.speechClient = new speech.SpeechClient({
-      apiKey: process.env.GOOGLE_CLOUD_API_KEY
-    });
+    this.speechClient = new speech.SpeechClient();
   }
 
   getSpeechConfig(languageCode) {
@@ -190,10 +193,22 @@ class GoogleCloudSTT {
 
 class GoogleCloudTranslation {
   constructor() {
-    this.translateClient = new translate.v2.Translate({
-      apiKey: process.env.GOOGLE_CLOUD_API_KEY,
-      projectId: process.env.GOOGLE_CLOUD_PROJECT_ID || 'default-project'
-    });
+    const apiKey = process.env.GOOGLE_CLOUD_API_KEY;
+    this.translateClient = apiKey
+      ? new translate.v2.Translate({
+          apiKey,
+          projectId: process.env.GOOGLE_CLOUD_PROJECT_ID || 'default-project'
+        })
+      : new translate.v2.Translate({
+          projectId: process.env.GOOGLE_CLOUD_PROJECT_ID || 'default-project'
+        });
+  }
+
+  async listSupportedLanguages(target = 'en') {
+    const normalizedTarget = normalizeLanguageCode(target) || 'en';
+    const googleTargetCode = translationLanguageMap[normalizedTarget] || 'en';
+    const [langs] = await this.translateClient.getLanguages(googleTargetCode);
+    return Array.isArray(langs) ? langs : [];
   }
 
   async translateText(text, targetLanguage, sourceLanguage = null) {

@@ -2,9 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
-import { getStreamToken } from "../lib/api";
+import { getStreamToken, getSupportedTranslationLanguages } from "../lib/api";
 import { ArrowLeftIcon } from "lucide-react";
-import { LANGUAGES } from "../constants";
 
 import {
   StreamVideo,
@@ -122,7 +121,7 @@ const CallPage = () => {
         {client && call ? (
           <StreamVideo client={client}>
             <StreamCall call={call}>
-              <CallContent />
+              <CallContent callId={callId} />
             </StreamCall>
           </StreamVideo>
         ) : (
@@ -135,7 +134,7 @@ const CallPage = () => {
   );
 };
 
-const CallContent = () => {
+const CallContent = ({ callId }) => {
   const { useCallCallingState } = useCallStateHooks();
   const callingState = useCallCallingState();
 
@@ -144,9 +143,14 @@ const CallContent = () => {
 
   const [captionsEnabled, setCaptionsEnabled] = useState(false);
   const [spokenLanguage, setSpokenLanguage] = useState("english");
-  const [targetLanguage, setTargetLanguage] = useState("english");
+  const [targetLanguage, setTargetLanguage] = useState("en");
   const [captions, setCaptions] = useState([]);
   const [captionMeta, setCaptionMeta] = useState(null);
+
+  useEffect(() => {
+    const nextSpoken = String(authUser?.nativeLanguage || "english").toLowerCase();
+    if (nextSpoken) setSpokenLanguage(nextSpoken);
+  }, [authUser?.nativeLanguage]);
 
   const pushCaption = useCallback((c) => {
     setCaptions((prev) => {
@@ -166,6 +170,7 @@ const CallContent = () => {
   return (
     <StreamTheme>
       <CaptionControls
+        callId={callId}
         authUser={authUser}
         captionsEnabled={captionsEnabled}
         setCaptionsEnabled={setCaptionsEnabled}
@@ -188,6 +193,7 @@ const CallContent = () => {
 };
 
 const CaptionControls = ({
+  callId,
   authUser,
   captionsEnabled,
   setCaptionsEnabled,
@@ -208,6 +214,25 @@ const CaptionControls = ({
   const micStreamRef = useRef(null);
   const interimRef = useRef("");
   const silenceTimerRef = useRef(null);
+
+  const [supportedLanguages, setSupportedLanguages] = useState([]);
+  const [languagesOpen, setLanguagesOpen] = useState(false);
+  const [loadingLanguages, setLoadingLanguages] = useState(false);
+  const [peerMeta, setPeerMeta] = useState(null);
+
+  const fetchSupportedLanguages = useCallback(async () => {
+    setLoadingLanguages(true);
+    try {
+      const res = await getSupportedTranslationLanguages({ target: "en" });
+      const items = Array.isArray(res?.languages) ? res.languages : [];
+      items.sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || "")));
+      setSupportedLanguages(items);
+    } catch {
+      toast.error("Failed to fetch supported languages");
+    } finally {
+      setLoadingLanguages(false);
+    }
+  }, []);
 
   const toDeepgramLanguage = (languageKey) => {
     const key = String(languageKey || "").trim().toLowerCase();
@@ -311,8 +336,6 @@ const CaptionControls = ({
       return;
     }
 
-    const lang = toDeepgramLanguage(spokenLanguage);
-
     const envBackend = import.meta.env.VITE_BACKEND_URL;
     const httpBase = envBackend
       ? String(envBackend).replace(/\/+$/, "")
@@ -325,7 +348,7 @@ const CaptionControls = ({
       ? origin.replace(/^https:\/\//, "wss://")
       : origin.replace(/^http:\/\//, "ws://");
 
-    const wsUrl = `${wsOrigin}/ws/google-cloud?token=${encodeURIComponent(token)}&language=${encodeURIComponent(spokenLanguage)}&target_language=${encodeURIComponent(targetLanguage)}`;
+    const wsUrl = `${wsOrigin}/ws/google-cloud?token=${encodeURIComponent(token)}&callId=${encodeURIComponent(callId || "")}&target_language=${encodeURIComponent(targetLanguage || "en")}`;
 
     let stopped = false;
 
@@ -452,6 +475,19 @@ const CaptionControls = ({
                 setCaptionMeta?.({
                   speaker_profile_language_raw: data?.speaker_profile_language_raw,
                   target_language_raw: data?.target_language_raw,
+                  call_id: data?.call_id,
+                });
+              } catch {
+              }
+              return;
+            }
+
+            if (data?.type === "peer") {
+              try {
+                setPeerMeta({
+                  userId: data?.userId,
+                  fullName: data?.fullName,
+                  nativeLanguage: data?.nativeLanguage,
                 });
               } catch {
               }
@@ -488,81 +524,43 @@ const CaptionControls = ({
               return;
             }
 
-            // Handle Google Cloud message format
-            const transcript =
-              data?.original_text || // Google Cloud format (original text)
-              data?.channel?.alternatives?.[0]?.transcript || // Deepgram format
-              data?.channel?.alternatives?.[0]?.paragraphs?.transcript || // Deepgram paragraphs
-              data?.text || // Sarvam format (old)
-              "";
+            if (data?.type !== "transcript") return;
 
-            if (!String(transcript || "").trim()) return;
+            const originalText = String(data?.original_text || "").trim();
+            if (!originalText) return;
 
-            const isFinal =
-              data?.is_final === true ||
-              data?.speech_final === true ||
-              data?.type === "Results" ||
-              data?.is_final === true; // Various formats
+            if (data?.is_final !== true) return;
 
-            // Handle dual captions (original + translation)
-            if (data?.original_text && data?.translated_text) {
-              // Send original text
-              interimRef.current = String(data.original_text || "");
-              if (isFinal) {
-                const originalCaption = {
-                  id: Date.now().toString(),
-                  speaker: authUser?.fullName || "You",
-                  text: data.original_text,
-                  timestamp: new Date().toISOString(),
-                  type: "original",
-                  language: data.speaker_profile_language_raw || "Unknown",
-                  speaker_profile_language: data.speaker_profile_language,
-                  speaker_profile_language_raw: data.speaker_profile_language_raw,
-                  target_language: data.target_language,
-                  target_language_raw: data.target_language_raw
-                };
-                console.log("[Captions] Pushing original caption:", JSON.stringify(originalCaption, null, 2));
-                pushCaption(originalCaption);
-              }
-              
-              // Send translated text with a small delay
-              setTimeout(() => {
-                if (data.translated_text) {
-                  const translatedCaption = {
-                    id: (Date.now() + 1).toString(),
-                    speaker: authUser?.fullName || "You",
-                    text: data.translated_text,
-                    timestamp: new Date().toISOString(),
-                    type: "translation",
-                    language: data.target_language_raw || "Unknown",
-                    speaker_profile_language: data.speaker_profile_language,
-                    speaker_profile_language_raw: data.speaker_profile_language_raw,
-                    target_language: data.target_language,
-                    target_language_raw: data.target_language_raw
-                  };
-                  console.log("[Captions] Pushing translated caption:", JSON.stringify(translatedCaption, null, 2));
-                  pushCaption(translatedCaption);
-                }
-              }, 100);
-            } else {
-              // Single caption (no translation needed)
-              interimRef.current = String(transcript || "");
-              if (isFinal) {
-                const caption = {
-                  id: Date.now().toString(),
-                  speaker: authUser?.fullName || "You",
-                  text: transcript,
-                  timestamp: new Date().toISOString(),
-                  type: "original",
-                  language: data?.speaker_profile_language_raw || "Unknown",
-                  speaker_profile_language: data?.speaker_profile_language,
-                  speaker_profile_language_raw: data?.speaker_profile_language_raw,
-                  target_language: data?.target_language,
-                  target_language_raw: data?.target_language_raw
-                };
-                console.log("[Captions] Pushing single caption:", JSON.stringify(caption, null, 2));
-                pushCaption(caption);
-              }
+            const speakerName = String(data?.speaker_full_name || data?.speaker || "Speaker");
+
+            const originalCaption = {
+              id: `${Date.now()}-o`,
+              speaker: speakerName,
+              text: originalText,
+              timestamp: new Date().toISOString(),
+              type: "original",
+              language: data?.speaker_profile_language_raw || "Unknown",
+              speaker_profile_language: data?.speaker_profile_language,
+              speaker_profile_language_raw: data?.speaker_profile_language_raw,
+              target_language: data?.target_language,
+              target_language_raw: data?.target_language_raw,
+            };
+            pushCaption(originalCaption);
+
+            if (data?.translated_text) {
+              const translatedCaption = {
+                id: `${Date.now()}-t`,
+                speaker: speakerName,
+                text: String(data.translated_text || ""),
+                timestamp: new Date().toISOString(),
+                type: "translation",
+                language: data?.target_language_raw || "Unknown",
+                speaker_profile_language: data?.speaker_profile_language,
+                speaker_profile_language_raw: data?.speaker_profile_language_raw,
+                target_language: data?.target_language,
+                target_language_raw: data?.target_language_raw,
+              };
+              pushCaption(translatedCaption);
             }
           };
         };
@@ -681,7 +679,7 @@ const CaptionControls = ({
 
       interimRef.current = "";
     };
-  }, [authUser?.fullName, call, captionsEnabled, pushCaption, setCaptionsEnabled, spokenLanguage, targetLanguage]);
+  }, [authUser?.fullName, call, captionsEnabled, pushCaption, setCaptionsEnabled, targetLanguage]);
 
   return (
     <div className="absolute top-4 right-4 z-20 flex flex-col gap-3 bg-base-100/95 backdrop-blur-md rounded-2xl border-2 border-primary/20 shadow-xl p-4 min-w-[320px]">
@@ -692,32 +690,83 @@ const CaptionControls = ({
       
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-base-content/70">Your Language:</span>
-        <select
-          className="select select-bordered select-sm select-primary flex-1"
-          value={spokenLanguage}
-          onChange={(e) => setSpokenLanguage(e.target.value)}
-        >
-          {LANGUAGES.map((lang) => (
-            <option key={`spoken-${lang}`} value={lang.toLowerCase()}>
-              {lang}
-            </option>
-          ))}
-        </select>
+        <div className="flex-1 text-xs font-semibold text-base-content/80">
+          {String(authUser?.nativeLanguage || "").trim() || "Not set in profile"}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium text-base-content/70">Opponent:</span>
+        <div className="flex-1 text-xs text-base-content/70">
+          {peerMeta?.fullName ? `${peerMeta.fullName} (${peerMeta.nativeLanguage || "Unknown"})` : "Waiting..."}
+        </div>
       </div>
       
       <div className="flex items-center gap-2">
-        <span className="text-xs font-medium text-base-content/70">Translate To:</span>
-        <select
-          className="select select-bordered select-sm select-info flex-1"
-          value={targetLanguage}
-          onChange={(e) => setTargetLanguage(e.target.value)}
-        >
-          {LANGUAGES.map((lang) => (
-            <option key={`target-${lang}`} value={lang.toLowerCase()}>
-              {lang}
-            </option>
-          ))}
-        </select>
+        <span className="text-xs font-medium text-base-content/70">Get Captions:</span>
+        <div className="relative flex-1">
+          <button
+            type="button"
+            className="btn btn-sm btn-outline w-full justify-between"
+            onClick={async () => {
+              const next = !languagesOpen;
+              setLanguagesOpen(next);
+              if (next && supportedLanguages.length === 0) {
+                await fetchSupportedLanguages();
+              }
+            }}
+          >
+            <span className="truncate">
+              {targetLanguage ? `Language 2: ${targetLanguage}` : "Select Language 2"}
+            </span>
+            <span className="text-xs opacity-60">
+              {loadingLanguages ? "..." : supportedLanguages.length ? supportedLanguages.length : ""}
+            </span>
+          </button>
+
+          {languagesOpen ? (
+            <div className="absolute right-0 mt-2 w-[420px] max-w-[80vw] z-30 bg-base-100 border border-base-300 rounded-xl shadow-xl overflow-hidden">
+              <div className="p-3 border-b border-base-300 flex items-center justify-between">
+                <div className="text-xs font-bold text-base-content/70">
+                  Total Languages: {supportedLanguages.length}
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-xs btn-ghost"
+                  onClick={() => setLanguagesOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="max-h-[280px] overflow-y-auto">
+                {supportedLanguages.map((l) => {
+                  const code = String(l?.language || "");
+                  const name = String(l?.name || code);
+                  return (
+                    <button
+                      key={`lang-${code}`}
+                      type="button"
+                      className={`w-full text-left px-3 py-2 hover:bg-base-200 flex items-center justify-between ${
+                        code === targetLanguage ? "bg-base-200" : ""
+                      }`}
+                      onClick={() => {
+                        setTargetLanguage(code || "en");
+                        setLanguagesOpen(false);
+                      }}
+                    >
+                      <span className="text-sm truncate">{name}</span>
+                      <span className="text-xs text-base-content/60">{code}</span>
+                    </button>
+                  );
+                })}
+                {!loadingLanguages && supportedLanguages.length === 0 ? (
+                  <div className="p-4 text-sm text-base-content/60">No languages loaded.</div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+        </div>
       </div>
       
       <div className="flex items-center justify-between">

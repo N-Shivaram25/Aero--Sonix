@@ -150,6 +150,13 @@ export async function getUserVoiceProfile(userId) {
   return response.data;
 }
 
+export async function getSupportedTranslationLanguages({ target } = {}) {
+  const params = {};
+  if (target) params.target = target;
+  const response = await axiosInstance.get("/google/languages", { params });
+  return response.data;
+}
+
 export async function callStt({ audioBlob, speakerUserId }) {
   const form = new FormData();
   form.append("audio", audioBlob);

@@ -15,6 +15,7 @@ import adminRoutes from "./routes/admin.route.js";
 import profileRoutes from "./routes/profile.route.js";
 import callRoutes from "./routes/call.route.js";
 import aiRobotRoutes from "./routes/aiRobot.route.js";
+import googleRoutes from "./routes/google.route.js";
 
 import { connectDB } from "./lib/db.js";
 import User from "./models/User.js";
@@ -77,6 +78,7 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/call", callRoutes);
 app.use("/api/ai-robot", aiRobotRoutes);
+app.use("/api/google", googleRoutes);
 
 // Also expose non-prefixed routes (useful when frontend points directly at backend base URL)
 app.use("/auth", authRoutes);
@@ -86,6 +88,7 @@ app.use("/admin", adminRoutes);
 app.use("/profile", profileRoutes);
 app.use("/call", callRoutes);
 app.use("/ai-robot", aiRobotRoutes);
+app.use("/google", googleRoutes);
 
 // Simple public health endpoint for readiness checks
 app.get("/api/health", (req, res) => {
@@ -119,6 +122,22 @@ const getUserFromToken = async (token) => {
 const setupGoogleCloudWsProxy = (server) => {
   const wss = new WebSocketServer({ noServer: true });
 
+  const callRooms = new Map();
+
+  const getRoom = (callId) => {
+    const key = String(callId || "").trim();
+    if (!key) return null;
+    if (!callRooms.has(key)) callRooms.set(key, new Map());
+    return callRooms.get(key);
+  };
+
+  const removeFromRoom = (callId, userId) => {
+    const room = callRooms.get(callId);
+    if (!room) return;
+    room.delete(userId);
+    if (room.size === 0) callRooms.delete(callId);
+  };
+
   server.on("upgrade", async (req, socket, head) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host}`);
@@ -147,28 +166,68 @@ const setupGoogleCloudWsProxy = (server) => {
     
     // Get current user's profile language (this is the speaker)
     const speaker = clientWs.user;
-    const speakerLanguageRaw = speaker?.profileLanguage || 'english';
+    const speakerLanguageRaw = speaker?.nativeLanguage || 'english';
     const speakerLanguageCode = normalizeLanguageCode(speakerLanguageRaw) || 'en';
     
     console.log("[GoogleCloudProxy] Speaker profile language:", speakerLanguageRaw, "->", speakerLanguageCode);
     
-    // Check for Google Cloud API key
-    const apiKey = process.env.GOOGLE_CLOUD_API_KEY;
-    if (!apiKey) {
-      console.log("[GoogleCloudProxy] GOOGLE_CLOUD_API_KEY is not set");
+    const url = clientWs.gladiaUrl;
+    const callId = String(url?.searchParams?.get("callId") || url?.searchParams?.get("call_id") || "").trim();
+    const room = getRoom(callId);
+    if (!room) {
       try {
-        clientWs.send(JSON.stringify({ type: "error", message: "GOOGLE_CLOUD_API_KEY is not set" }));
+        clientWs.send(JSON.stringify({ type: "error", message: "Missing callId" }));
       } catch {
       }
-      clientWs.close(1011, "GOOGLE_CLOUD_API_KEY is not set");
+      clientWs.close(1008, "Missing callId");
       return;
     }
 
-    const url = clientWs.gladiaUrl;
-    const targetLanguageRaw = (url?.searchParams?.get("target_language") || url?.searchParams?.get("targetLanguage") || "english").trim();
-    const targetLanguageCode = normalizeLanguageCode(targetLanguageRaw) || 'en';
-    
-    console.log("[GoogleCloudProxy] Target language for translation:", targetLanguageRaw, "->", targetLanguageCode);
+    const myTargetLanguageRaw = (url?.searchParams?.get("target_language") || url?.searchParams?.get("targetLanguage") || "english").trim();
+    const myTargetLanguageCode = normalizeLanguageCode(myTargetLanguageRaw) || 'en';
+
+    const myUserId = String(speaker?._id || speaker?.id || "");
+    const myUserName = String(speaker?.fullName || "");
+
+    for (const [, peer] of room.entries()) {
+      try {
+        clientWs.send(
+          JSON.stringify({
+            type: "peer",
+            userId: peer.userId,
+            fullName: peer.fullName,
+            nativeLanguage: peer.nativeLanguage,
+          })
+        );
+      } catch {
+      }
+    }
+
+    for (const [, peer] of room.entries()) {
+      try {
+        peer.ws.send(
+          JSON.stringify({
+            type: "peer",
+            userId: myUserId,
+            fullName: myUserName,
+            nativeLanguage: speakerLanguageRaw,
+          })
+        );
+      } catch {
+      }
+    }
+
+    room.set(myUserId, {
+      userId: myUserId,
+      fullName: myUserName,
+      nativeLanguage: speakerLanguageRaw,
+      targetLanguageRaw: myTargetLanguageRaw,
+      targetLanguageCode: myTargetLanguageCode,
+      ws: clientWs,
+    });
+
+    console.log("[GoogleCloudProxy] callId:", callId);
+    console.log("[GoogleCloudProxy] My target language for receiving translations:", myTargetLanguageRaw, "->", myTargetLanguageCode);
 
     try {
       clientWs.send(
@@ -176,8 +235,9 @@ const setupGoogleCloudWsProxy = (server) => {
           type: "meta",
           speaker_profile_language: speakerLanguageCode,
           speaker_profile_language_raw: speakerLanguageRaw,
-          target_language: targetLanguageCode,
-          target_language_raw: targetLanguageRaw,
+          target_language: myTargetLanguageCode,
+          target_language_raw: myTargetLanguageRaw,
+          call_id: callId,
         })
       );
     } catch {
@@ -251,39 +311,50 @@ const setupGoogleCloudWsProxy = (server) => {
                   console.log('[GoogleCloudProxy] Transcript:', originalText);
                   console.log('[GoogleCloudProxy] Is final:', isFinal);
                   
-                  let translatedText = null;
-                  
-                  // Only translate if it's a final result and target language is different
-                  if (isFinal && targetLanguageCode !== speakerLanguageCode) {
-                    try {
-                      const translation = await translationService.translateText(
-                        originalText,
-                        targetLanguageCode,
-                        speakerLanguageCode
-                      );
-                      translatedText = translation.translatedText;
-                      console.log('[GoogleCloudProxy] Translation:', translatedText);
-                    } catch (translationError) {
-                      console.error('[GoogleCloudProxy] Translation error:', translationError);
-                    }
-                  }
-                  
                   if (isFinal) {
-                    const outgoing = {
-                      type: 'transcript',
-                      original_text: originalText,
-                      original_language: speakerLanguageCode,
-                      translated_text: translatedText,
-                      translated_language: translatedText ? targetLanguageCode : null,
-                      is_final: true,
-                      language_code: speakerLanguageCode,
-                      speaker_profile_language: speakerLanguageCode,
-                      speaker_profile_language_raw: speakerLanguageRaw,
-                      target_language: targetLanguageCode,
-                      target_language_raw: targetLanguageRaw
-                    };
-                    console.log('[GoogleCloudProxy] Sending to client:', JSON.stringify(outgoing, null, 2));
-                    clientWs.send(JSON.stringify(outgoing));
+                    const currentRoom = getRoom(callId);
+                    if (!currentRoom) return;
+
+                    for (const [, peer] of currentRoom.entries()) {
+                      if (!peer?.ws || peer.userId === myUserId) continue;
+
+                      let translatedText = null;
+                      const peerTargetCode = normalizeLanguageCode(peer.targetLanguageRaw) || peer.targetLanguageCode || 'en';
+
+                      if (peerTargetCode !== speakerLanguageCode) {
+                        try {
+                          const translation = await translationService.translateText(
+                            originalText,
+                            peerTargetCode,
+                            speakerLanguageCode
+                          );
+                          translatedText = translation.translatedText;
+                        } catch (translationError) {
+                          console.error('[GoogleCloudProxy] Translation error:', translationError);
+                        }
+                      }
+
+                      const outgoing = {
+                        type: 'transcript',
+                        original_text: originalText,
+                        original_language: speakerLanguageCode,
+                        translated_text: translatedText,
+                        translated_language: translatedText ? peerTargetCode : null,
+                        is_final: true,
+                        language_code: speakerLanguageCode,
+                        speaker_profile_language: speakerLanguageCode,
+                        speaker_profile_language_raw: speakerLanguageRaw,
+                        target_language: peerTargetCode,
+                        target_language_raw: peer.targetLanguageRaw,
+                        speaker_user_id: myUserId,
+                        speaker_full_name: myUserName,
+                        call_id: callId,
+                      };
+                      try {
+                        peer.ws.send(JSON.stringify(outgoing));
+                      } catch {
+                      }
+                    }
                   }
                 }
               }
@@ -343,11 +414,19 @@ const setupGoogleCloudWsProxy = (server) => {
     });
 
     clientWs.on("close", () => {
+      try {
+        removeFromRoom(callId, myUserId);
+      } catch {
+      }
       cleanup("Client disconnected");
     });
 
     clientWs.on("error", (err) => {
       console.log("[GoogleCloudProxy] Client socket error", err?.message || err);
+      try {
+        removeFromRoom(callId, myUserId);
+      } catch {
+      }
       cleanup("Client socket error");
     });
   });
