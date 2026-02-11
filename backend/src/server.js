@@ -166,10 +166,27 @@ const setupDeepgramWsProxy = (server) => {
 
     const dgWs = new WebSocket(dgUrl, ["token", apiKey]);
 
+    let dgOpened = false;
+    const pendingChunks = [];
+    const maxPendingChunks = 60;
+
+    const openTimeout = setTimeout(() => {
+      if (dgOpened) return;
+      try {
+        clientWs.send(JSON.stringify({ type: "error", message: "Deepgram connection timeout" }));
+      } catch {
+      }
+      cleanup("Deepgram connection timeout");
+    }, 8000);
+
     let closed = false;
     const cleanup = (reason) => {
       if (closed) return;
       closed = true;
+      try {
+        clearTimeout(openTimeout);
+      } catch {
+      }
       try {
         dgWs.close();
       } catch {
@@ -179,6 +196,23 @@ const setupDeepgramWsProxy = (server) => {
       } catch {
       }
     };
+
+    dgWs.on("open", () => {
+      dgOpened = true;
+      try {
+        clearTimeout(openTimeout);
+      } catch {
+      }
+      while (pendingChunks.length && dgWs.readyState === WebSocket.OPEN) {
+        const chunk = pendingChunks.shift();
+        try {
+          dgWs.send(chunk);
+        } catch {
+          cleanup("Failed to flush audio to Deepgram");
+          break;
+        }
+      }
+    });
 
     dgWs.on("message", (data) => {
       if (closed) return;
@@ -210,7 +244,10 @@ const setupDeepgramWsProxy = (server) => {
 
     clientWs.on("message", (chunk) => {
       if (closed) return;
-      if (dgWs.readyState !== WebSocket.OPEN) return;
+      if (dgWs.readyState !== WebSocket.OPEN) {
+        if (pendingChunks.length < maxPendingChunks) pendingChunks.push(chunk);
+        return;
+      }
       try {
         dgWs.send(chunk);
       } catch {
