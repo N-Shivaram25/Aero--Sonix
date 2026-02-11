@@ -19,54 +19,71 @@ import aiRobotRoutes from "./routes/aiRobot.route.js";
 import { connectDB } from "./lib/db.js";
 import User from "./models/User.js";
 
-// Sarvam translation function
-async function translateText(text, sourceLang, targetLang) {
-  try {
-    const apiKey = process.env.SARVAM_API_KEY;
-    if (!apiKey) {
-      console.error("[Translation] SARVAM_API_KEY not set");
-      return null;
-    }
+// Gladia language mapping
+const gladiaLanguageMap = {
+  'en': 'en',
+  'te': 'te',
+  'hi': 'hi',
+  'ta': 'ta',
+  'kn': 'kn',
+  'ml': 'ml',
+  'pa': 'pa',
+  'gu': 'gu',
+  'mr': 'mr',
+  'bn': 'bn',
+  'or': 'or',
+  'as': 'as',
+  'ur': 'ur',
+  'ne': 'ne',
+  'sa': 'sa',
+  'fr': 'fr',
+  'es': 'es',
+  'de': 'de',
+  'it': 'it',
+  'pt': 'pt',
+  'ru': 'ru',
+  'zh': 'zh',
+  'ja': 'ja',
+  'ko': 'ko',
+  'ar': 'ar'
+};
 
-    const src = String(sourceLang || "").trim() || "auto";
-    const tgt = String(targetLang || "").trim();
-    if (!tgt) return null;
-
-    console.log("[Translation] Request", { src, tgt });
-
-    const response = await fetch('https://api.sarvam.ai/translate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'api-subscription-key': apiKey,
-      },
-      body: JSON.stringify({
-        input: text,
-        source_language_code: src,
-        target_language_code: tgt,
-        mode: "formal",
-        model: "sarvam-translate:v1"
-      })
-    });
-
-    if (!response.ok) {
-      let errBody = "";
-      try {
-        errBody = await response.text();
-      } catch {
-      }
-      console.error("[Translation] API error:", response.status, response.statusText, errBody);
-      return null;
-    }
-
-    const result = await response.json();
-    console.log("[Translation] Response", result);
-    return result?.translated_text || null;
-  } catch (error) {
-    console.error("[Translation] Error:", error);
-    return null;
-  }
-}
+// Normalize Gladia language codes
+const normalizeGladiaLanguageCode = (value) => {
+  const v = String(value || "").trim().toLowerCase();
+  if (!v) return null;
+  // Handle common variations
+  if (v === 'english' || v === 'en') return 'en';
+  if (v === 'telugu' || v === 'te') return 'te';
+  if (v === 'hindi' || v === 'hi') return 'hi';
+  if (v === 'tamil' || v === 'ta') return 'ta';
+  if (v === 'kannada' || v === 'kn') return 'kn';
+  if (v === 'malayalam' || v === 'ml') return 'ml';
+  if (v === 'punjabi' || v === 'pa') return 'pa';
+  if (v === 'gujarati' || v === 'gu') return 'gu';
+  if (v === 'marathi' || v === 'mr') return 'mr';
+  if (v === 'bengali' || v === 'bn') return 'bn';
+  if (v === 'odia' || v === 'or') return 'or';
+  if (v === 'assamese' || v === 'as') return 'as';
+  if (v === 'urdu' || v === 'ur') return 'ur';
+  if (v === 'nepali' || v === 'ne') return 'ne';
+  if (v === 'sanskrit' || v === 'sa') return 'sa';
+  if (v === 'french' || v === 'fr') return 'fr';
+  if (v === 'spanish' || v === 'es') return 'es';
+  if (v === 'german' || v === 'de') return 'de';
+  if (v === 'italian' || v === 'it') return 'it';
+  if (v === 'portuguese' || v === 'pt') return 'pt';
+  if (v === 'russian' || v === 'ru') return 'ru';
+  if (v === 'chinese' || v === 'zh') return 'zh';
+  if (v === 'japanese' || v === 'ja') return 'ja';
+  if (v === 'korean' || v === 'ko') return 'ko';
+  if (v === 'arabic' || v === 'ar') return 'ar';
+  
+  // Return as-is if it's already a valid 2-letter code
+  if (/^[a-z]{2}$/.test(v)) return v;
+  
+  return null;
+};
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -163,21 +180,13 @@ const getUserFromToken = async (token) => {
   }
 };
 
-const normalizeSarvamLanguageCode = (value, languageMap) => {
-  const v = String(value || "").trim();
-  if (!v) return null;
-  if (/^[a-z]{2}-IN$/i.test(v)) return v;
-  const short = v.toLowerCase();
-  return languageMap[short] || null;
-};
-
-const setupDeepgramWsProxy = (server) => {
+const setupGladiaWsProxy = (server) => {
   const wss = new WebSocketServer({ noServer: true });
 
   server.on("upgrade", async (req, socket, head) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host}`);
-      if (url.pathname !== "/ws/deepgram") return;
+      if (url.pathname !== "/ws/gladia") return;
 
       const token = url.searchParams.get("token") || "";
       const user = await getUserFromToken(token);
@@ -189,7 +198,7 @@ const setupDeepgramWsProxy = (server) => {
 
       wss.handleUpgrade(req, socket, head, (ws) => {
         ws.user = user;
-        ws.deepgramUrl = url;
+        ws.gladiaUrl = url;
         wss.emit("connection", ws, req);
       });
     } catch {
@@ -198,279 +207,228 @@ const setupDeepgramWsProxy = (server) => {
   });
 
   wss.on("connection", async (clientWs) => {
-    console.log("[SarvamProxy] client connected");
-    
-    // Map language codes to Sarvam format
-    const languageMap = {
-      'en': 'en-IN',
-      'te': 'te-IN',
-      'hi': 'hi-IN',
-      'ta': 'ta-IN',
-      'kn': 'kn-IN',
-      'ml': 'ml-IN',
-      'pa': 'pa-IN',
-      'gu': 'gu-IN',
-      'mr': 'mr-IN',
-      'bn': 'bn-IN',
-      'or': 'or-IN',
-      'as': 'as-IN'
-    };
+    console.log("[GladiaProxy] client connected");
     
     // Get current user's profile language (this is the speaker)
     const speaker = clientWs.user;
-    const speakerLanguageRaw = speaker?.profileLanguage || 'en';
-    const speakerLanguageCode = normalizeSarvamLanguageCode(speakerLanguageRaw, languageMap) || 'en-IN';
+    const speakerLanguageRaw = speaker?.profileLanguage || 'english';
+    const speakerLanguageCode = normalizeGladiaLanguageCode(speakerLanguageRaw) || 'en';
     
-    console.log("[SarvamProxy] Speaker profile language:", speakerLanguageRaw, "->", speakerLanguageCode);
+    console.log("[GladiaProxy] Speaker profile language:", speakerLanguageRaw, "->", speakerLanguageCode);
     
-    // Check for Sarvam API key
-    const apiKey = process.env.SARVAM_API_KEY;
+    // Check for Gladia API key
+    const apiKey = process.env.GLADIA_API_KEY;
     if (!apiKey) {
-      console.log("[SarvamProxy] SARVAM_API_KEY is not set");
+      console.log("[GladiaProxy] GLADIA_API_KEY is not set");
       try {
-        clientWs.send(JSON.stringify({ type: "error", message: "SARVAM_API_KEY is not set" }));
+        clientWs.send(JSON.stringify({ type: "error", message: "GLADIA_API_KEY is not set" }));
       } catch {
       }
-      clientWs.close(1011, "SARVAM_API_KEY is not set");
+      clientWs.close(1011, "GLADIA_API_KEY is not set");
       return;
     }
 
-    const url = clientWs.sarvamUrl;
-    const language = (url?.searchParams?.get("language") || "en").trim();
-    const wantsAutoLang = language.toLowerCase() === "auto";
-    const targetLanguageRaw = (url?.searchParams?.get("target_language") || url?.searchParams?.get("targetLanguage") || language).trim();
+    const url = clientWs.gladiaUrl;
+    const targetLanguageRaw = (url?.searchParams?.get("target_language") || url?.searchParams?.get("targetLanguage") || "english").trim();
+    const targetLanguageCode = normalizeGladiaLanguageCode(targetLanguageRaw) || 'en';
+    
+    console.log("[GladiaProxy] Target language for translation:", targetLanguageRaw, "->", targetLanguageCode);
 
-    const sarvamLanguage = normalizeSarvamLanguageCode(language, languageMap) || 'en-IN';
-    const targetLanguageCode = normalizeSarvamLanguageCode(targetLanguageRaw, languageMap) || sarvamLanguage;
-    console.log("[SarvamProxy] STT language:", language, "->", sarvamLanguage);
-    console.log("[SarvamProxy] Caption target language:", targetLanguageRaw, "->", targetLanguageCode);
+    // Step 1: Initialize Gladia session
+    let gladiaWsUrl = null;
+    let sessionId = null;
+    try {
+      const response = await fetch("https://api.gladia.io/v2/live", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-gladia-key": apiKey,
+        },
+        body: JSON.stringify({
+          encoding: "wav/pcm",
+          sample_rate: 16000,
+          bit_depth: 16,
+          channels: 1,
+          language_config: {
+            languages: [speakerLanguageCode],
+            code_switching: false
+          },
+          realtime_processing: {
+            translation: true,
+            translation_config: {
+              target_languages: [targetLanguageCode],
+              model: "base",
+              match_original_utterances: true,
+              context_adaptation: true,
+              informal: false
+            }
+          },
+          messages_config: {
+            receive_final_transcripts: true,
+            receive_realtime_processing_events: true
+          }
+        }),
+      });
 
-    const sarvamUrl = `wss://api.sarvam.ai/speech-to-text/ws?model=saaras:v3&mode=verbatim&language-code=${encodeURIComponent(sarvamLanguage)}&sample_rate=16000&input_audio_codec=pcm_s16le`;
-
-    console.log("[SarvamProxy] Connecting to Sarvam with URL:", sarvamUrl);
-    console.log("[SarvamProxy] Mode: verbatim (should preserve original language exactly)");
-    const sarvamWs = new WebSocket(sarvamUrl, {
-      headers: {
-        'Api-Subscription-Key': apiKey,
-      },
-    });
-
-    let sarvamOpened = false;
-    const pendingChunks = [];
-    const maxPendingChunks = 60;
-
-    const openTimeout = setTimeout(() => {
-      if (sarvamOpened) return;
-      console.log("[SarvamProxy] sarvam connection timeout");
-      try {
-        clientWs.send(JSON.stringify({ type: "error", message: "Sarvam connection timeout" }));
-      } catch {
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("[GladiaProxy] Failed to initialize session:", response.status, errorText);
+        clientWs.send(JSON.stringify({ type: "error", message: `Gladia session init failed: ${errorText}` }));
+        clientWs.close(1011, "Gladia session init failed");
+        return;
       }
-      cleanup("Sarvam connection timeout");
-    }, 8000);
+
+      const sessionData = await response.json();
+      gladiaWsUrl = sessionData.url;
+      sessionId = sessionData.id;
+      console.log("[GladiaProxy] Session initialized:", sessionId);
+    } catch (error) {
+      console.error("[GladiaProxy] Error initializing session:", error);
+      clientWs.send(JSON.stringify({ type: "error", message: "Gladia session init error" }));
+      clientWs.close(1011, "Gladia session init error");
+      return;
+    }
+
+    // Step 2: Connect to Gladia WebSocket
+    const gladiaWs = new WebSocket(gladiaWsUrl);
+
+    const translationByUtteranceId = new Map();
+
+    const extractTranslationText = (msg, targetLang) => {
+      const lang = String(targetLang || "").trim().toLowerCase();
+      if (!lang) return null;
+
+      const candidates = [
+        msg?.translation,
+        msg?.data?.translation,
+        msg?.realtime_processing?.translation,
+        msg?.data?.realtime_processing?.translation,
+      ].filter(Boolean);
+
+      for (const t of candidates) {
+        const results = t?.results;
+        if (!Array.isArray(results)) continue;
+
+        const picked = results.find(
+          (r) => Array.isArray(r?.languages) && r.languages.map((x) => String(x).toLowerCase()).includes(lang)
+        );
+        const text = picked?.full_transcript;
+        if (String(text || "").trim()) return text;
+      }
+
+      return null;
+    };
 
     let closed = false;
     const cleanup = (reason) => {
       if (closed) return;
       closed = true;
-      console.log("[SarvamProxy] cleanup", reason || "(no reason)");
+      console.log("[GladiaProxy] cleanup", reason || "(no reason)");
       try {
-        clearTimeout(openTimeout);
+        gladiaWs.close();
       } catch {
       }
       try {
-        sarvamWs.close();
-      } catch {
-      }
-      try {
-        clientWs.close(1011, reason || "Sarvam connection closed");
+        clientWs.close(1011, reason || "Gladia connection closed");
       } catch {
       }
     };
 
-    sarvamWs.on("open", () => {
-      sarvamOpened = true;
-      console.log("[SarvamProxy] sarvam socket open");
-      try {
-        clearTimeout(openTimeout);
-      } catch {
-      }
-      
-      // Send initial config message
-      try {
-        sarvamWs.send(JSON.stringify({
-          type: "config",
-          prompt: ""
-        }));
-        console.log("[SarvamProxy] Sent initial config message");
-      } catch (error) {
-        console.error("[SarvamProxy] Failed to send config message:", error);
-      }
-      
-      // Send any pending chunks
-      while (pendingChunks.length && sarvamWs.readyState === WebSocket.OPEN) {
-        const chunk = pendingChunks.shift();
-        const base64Audio = chunk.toString('base64');
-        try {
-          sarvamWs.send(JSON.stringify({
-            audio: {
-              data: base64Audio,
-              sample_rate: 16000,
-              encoding: "audio/wav"
-            }
-          }));
-        } catch {
-          cleanup("Failed to flush audio to Sarvam");
-          break;
-        }
-      }
+    gladiaWs.on("open", () => {
+      console.log("[GladiaProxy] Gladia WebSocket connected");
     });
 
-    sarvamWs.on("message", async (data) => {
+    gladiaWs.on("message", async (data) => {
       if (closed) return;
       try {
         const message = JSON.parse(data.toString());
-        console.log("[SarvamProxy] Received Sarvam message:", JSON.stringify(message, null, 2));
+        console.log("[GladiaProxy] Received Gladia message:", JSON.stringify(message, null, 2));
         
-        // Handle transcription endpoint responses
-        if (message.type === 'data' && message.data?.transcript) {
-          const originalText = message.data.transcript;
-          const detectedLanguageRaw = message.data.language_code || sarvamLanguage;
-          const detectedLanguage = normalizeSarvamLanguageCode(detectedLanguageRaw, languageMap) || detectedLanguageRaw;
+        // Handle transcript messages with translation
+        if (message.type === "transcript" && message.data?.utterance?.text) {
+          const originalText = message.data.utterance.text;
+          const detectedLanguage = message.data.utterance.language || speakerLanguageCode;
+          const isFinal = message.data.is_final !== false;
+          const utteranceId = message.data?.id;
           
-          console.log("[SarvamProxy] Forwarding transcript:", originalText);
-          console.log("[SarvamProxy] Language detected:", detectedLanguage);
-          console.log("[SarvamProxy] Using speaker profile language for translation:", speakerLanguageCode);
+          console.log("[GladiaProxy] Transcript:", originalText);
+          console.log("[GladiaProxy] Language:", detectedLanguage);
+          console.log("[GladiaProxy] Is final:", isFinal);
           
-          // Translate from speaker's profile language to target language if they're different
-          let translatedText = null;
-          if (speakerLanguageCode && targetLanguageCode && speakerLanguageCode !== targetLanguageCode) {
-            console.log("[SarvamProxy] Translating from speaker profile language", speakerLanguageCode, "to", targetLanguageCode);
-            translatedText = await translateText(originalText, speakerLanguageCode, targetLanguageCode);
-            console.log("[SarvamProxy] Translation result:", translatedText);
+          // Extract translation if available (Gladia may send it inside transcript OR as separate realtime_processing events)
+          let translatedText = extractTranslationText(message, targetLanguageCode);
+          if (!translatedText && utteranceId && translationByUtteranceId.has(utteranceId)) {
+            translatedText = translationByUtteranceId.get(utteranceId);
+          }
+          if (translatedText) {
+            console.log("[GladiaProxy] Translation found:", translatedText);
           }
           
-          const outgoing = {
-            type: 'transcript',
-            original_text: originalText,
-            original_language: speakerLanguageCode,
-            translated_text: translatedText,
-            translated_language: translatedText ? targetLanguageCode : null,
-            is_final: true,
-            language_code: detectedLanguage,
-            speaker_profile_language: speakerLanguageCode,
-            speaker_profile_language_raw: speakerLanguageRaw,
-            target_language: targetLanguageCode,
-            target_language_raw: targetLanguageRaw
-          };
-          console.log("[SarvamProxy] Sending to client:", JSON.stringify(outgoing, null, 2));
-          clientWs.send(JSON.stringify(outgoing));
-          
-        } else if (message.type === 'transcript' && message.data?.transcript) {
-          // Alternative format for transcription endpoint
-          const originalText = message.data.transcript;
-          const detectedLanguageRaw = message.data.language_code || sarvamLanguage;
-          const detectedLanguage = normalizeSarvamLanguageCode(detectedLanguageRaw, languageMap) || detectedLanguageRaw;
-          
-          console.log("[SarvamProxy] Forwarding transcript (alt format):", originalText);
-          console.log("[SarvamProxy] Language detected:", detectedLanguage);
-          console.log("[SarvamProxy] Using speaker profile language for translation:", speakerLanguageCode);
-          
-          // Translate from speaker's profile language to target language if they're different
-          let translatedText = null;
-          if (speakerLanguageCode && targetLanguageCode && speakerLanguageCode !== targetLanguageCode) {
-            console.log("[SarvamProxy] Translating from speaker profile language", speakerLanguageCode, "to", targetLanguageCode);
-            translatedText = await translateText(originalText, speakerLanguageCode, targetLanguageCode);
-            console.log("[SarvamProxy] Translation result:", translatedText);
+          if (isFinal) {
+            const outgoing = {
+              type: 'transcript',
+              original_text: originalText,
+              original_language: speakerLanguageCode,
+              translated_text: translatedText,
+              translated_language: translatedText ? targetLanguageCode : null,
+              is_final: true,
+              language_code: detectedLanguage,
+              speaker_profile_language: speakerLanguageCode,
+              speaker_profile_language_raw: speakerLanguageRaw,
+              target_language: targetLanguageCode,
+              target_language_raw: targetLanguageRaw
+            };
+            console.log("[GladiaProxy] Sending to client:", JSON.stringify(outgoing, null, 2));
+            clientWs.send(JSON.stringify(outgoing));
           }
-          
-          const outgoing = {
-            type: 'transcript',
-            original_text: originalText,
-            original_language: speakerLanguageCode,
-            translated_text: translatedText,
-            translated_language: translatedText ? targetLanguageCode : null,
-            is_final: true,
-            language_code: detectedLanguage,
-            speaker_profile_language: speakerLanguageCode,
-            speaker_profile_language_raw: speakerLanguageRaw,
-            target_language: targetLanguageCode,
-            target_language_raw: targetLanguageRaw
-          };
-          console.log("[SarvamProxy] Sending to client (alt):", JSON.stringify(outgoing, null, 2));
-          clientWs.send(JSON.stringify(outgoing));
-          
-        } else if (message.type === 'events') {
-          // Handle VAD events (speech start/end)
-          console.log("[SarvamProxy] Speech event:", message.data.signal_type);
+        } else if (message.type === "realtime_processing") {
+          const utteranceId = message.data?.id;
+          const translatedText = extractTranslationText(message, targetLanguageCode);
+          if (utteranceId && translatedText) {
+            translationByUtteranceId.set(utteranceId, translatedText);
+            console.log("[GladiaProxy] Cached translation for", utteranceId, ":", translatedText);
+          } else {
+            console.log("[GladiaProxy] Realtime processing event:", message);
+          }
         } else {
-          console.log("[SarvamProxy] Unhandled message type:", message.type);
+          console.log("[GladiaProxy] Unhandled message type:", message.type);
         }
       } catch (error) {
-        console.error("[SarvamProxy] Error processing message:", error);
+        console.error("[GladiaProxy] Error processing message:", error);
       }
     });
 
-    sarvamWs.on("close", (code, reason) => {
-      const msg = reason ? reason.toString() : "Sarvam socket closed";
-      console.log("[SarvamProxy] sarvam socket close", code, msg);
+    gladiaWs.on("close", (code, reason) => {
+      const msg = reason ? reason.toString() : "Gladia socket closed";
+      console.log("[GladiaProxy] Gladia socket close", code, msg);
       cleanup(`${msg} (${code || "no_code"})`);
     });
     
-    sarvamWs.on("error", (err) => {
-      console.log("[SarvamProxy] sarvam socket error", err?.message || err);
-      cleanup("Sarvam socket error");
+    gladiaWs.on("error", (err) => {
+      console.log("[GladiaProxy] Gladia socket error", err?.message || err);
+      cleanup("Gladia socket error");
     });
 
-    let gotAnyAudio = false;
-    let audioChunkCount = 0;
+    // Forward audio chunks from client to Gladia
     clientWs.on("message", (chunk) => {
       if (closed) return;
-      if (!gotAnyAudio) {
-        gotAnyAudio = true;
-        console.log("[SarvamProxy] first audio chunk", typeof chunk, chunk?.length, chunk.constructor.name);
-      }
-      audioChunkCount++;
-      
-      // Log every 100 chunks to track data flow
-      if (audioChunkCount % 100 === 0) {
-        console.log("[SarvamProxy] Processed audio chunk #" + audioChunkCount + ", size: " + chunk?.length + ", Sarvam ready: " + (sarvamWs.readyState === WebSocket.OPEN));
-      }
-      
-      if (sarvamWs.readyState !== WebSocket.OPEN) {
-        if (pendingChunks.length < maxPendingChunks) {
-          pendingChunks.push(chunk);
-          console.log("[SarvamProxy] Queued chunk, pending:", pendingChunks.length);
-        }
-        return;
-      }
-      
-      try {
-        // Convert PCM chunk to base64 and send as Sarvam audio message
-        const base64Audio = chunk.toString('base64');
-        sarvamWs.send(JSON.stringify({
-          audio: {
-            data: base64Audio,
-            sample_rate: 16000,
-            encoding: "audio/wav"
-          }
-        }));
-      } catch (error) {
-        console.error("[SarvamProxy] Failed to forward audio to Sarvam:", error);
-        cleanup("Failed to forward audio to Sarvam");
+      if (gladiaWs.readyState === WebSocket.OPEN) {
+        // Send as binary audio chunk
+        gladiaWs.send(chunk);
       }
     });
 
-    clientWs.on("close", (code, reason) => {
-      const msg = reason ? reason.toString() : "Client disconnected";
-      console.log("[SarvamProxy] client close", code, msg);
-      cleanup(msg);
+    clientWs.on("close", () => {
+      cleanup("Client disconnected");
     });
+
     clientWs.on("error", (err) => {
-      console.log("[SarvamProxy] client socket error", err?.message || err);
+      console.log("[GladiaProxy] Client socket error", err?.message || err);
       cleanup("Client socket error");
     });
   });
+
+  return wss;
 };
 
 if (process.env.NODE_ENV === "production") {
@@ -494,7 +452,7 @@ const __filename = fileURLToPath(import.meta.url);
 // If the file is executed directly (node src/server.js, nodemon, etc.) start the server.
 if (process.argv[1] === __filename) {
   const server = http.createServer(app);
-  setupDeepgramWsProxy(server);
+  setupGladiaWsProxy(server);
   server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
   });

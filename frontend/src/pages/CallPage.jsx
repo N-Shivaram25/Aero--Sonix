@@ -317,7 +317,7 @@ const CaptionControls = ({
       ? origin.replace(/^https:\/\//, "wss://")
       : origin.replace(/^http:\/\//, "ws://");
 
-    const wsUrl = `${wsOrigin}/ws/deepgram?token=${encodeURIComponent(token)}&language=${encodeURIComponent(lang)}&target_language=${encodeURIComponent(lang)}`;
+    const wsUrl = `${wsOrigin}/ws/gladia?token=${encodeURIComponent(token)}&language=${encodeURIComponent(spokenLanguage)}&target_language=${encodeURIComponent(spokenLanguage)}`;
 
     let stopped = false;
 
@@ -429,12 +429,12 @@ const CaptionControls = ({
 
             console.log("[Captions] Received WS message:", JSON.stringify(data, null, 2));
 
-            // Handle both Deepgram and Sarvam message formats
+            // Handle Gladia message format
             const transcript =
+              data?.original_text || // Gladia format (original text)
               data?.channel?.alternatives?.[0]?.transcript || // Deepgram format
               data?.channel?.alternatives?.[0]?.paragraphs?.transcript || // Deepgram paragraphs
               data?.text || // Sarvam format (old)
-              data?.original_text || // Sarvam format (new - original text)
               "";
 
             if (!String(transcript || "").trim()) return;
@@ -443,7 +443,7 @@ const CaptionControls = ({
               data?.is_final === true ||
               data?.speech_final === true ||
               data?.type === "Results" ||
-              data?.is_final === true; // Sarvam format
+              data?.is_final === true; // Various formats
 
             // Handle dual captions (original + translation)
             if (data?.original_text && data?.translated_text) {
