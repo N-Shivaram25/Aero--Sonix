@@ -321,6 +321,11 @@ const CaptionControls = ({
 
     const start = async () => {
       try {
+        try {
+          await call?.microphone?.enable?.();
+        } catch {
+        }
+
         let stream;
         const publishedAudio = call?.state?.localParticipant?.publishedTracks?.audio?.track;
         const maybeMediaStreamTrack = publishedAudio?.mediaStreamTrack || publishedAudio;
@@ -333,8 +338,12 @@ const CaptionControls = ({
         if (isUsableTrack) {
           stream = new MediaStream([maybeMediaStreamTrack]);
         } else {
-          toast.error("Captions: Stream mic track not found, using device mic");
-          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          } catch {
+            toast.error("Captions: could not access microphone. Please allow mic permissions.");
+            throw new Error("getUserMedia failed");
+          }
         }
         if (stopped) return;
         micStreamRef.current = stream;
