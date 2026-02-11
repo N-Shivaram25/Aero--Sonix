@@ -151,6 +151,14 @@ const getUserFromToken = async (token) => {
   }
 };
 
+const normalizeSarvamLanguageCode = (value, languageMap) => {
+  const v = String(value || "").trim();
+  if (!v) return null;
+  if (/^[a-z]{2}-IN$/i.test(v)) return v;
+  const short = v.toLowerCase();
+  return languageMap[short] || null;
+};
+
 const setupDeepgramWsProxy = (server) => {
   const wss = new WebSocketServer({ noServer: true });
 
@@ -196,13 +204,6 @@ const setupDeepgramWsProxy = (server) => {
       'as': 'as-IN'
     };
     
-    // Get user profile language for translation
-    const user = clientWs.user;
-    const userLanguage = user?.profileLanguage || 'en'; // Default to English if not set
-    const userLanguageCode = languageMap[userLanguage] || 'en-IN';
-    
-    console.log("[SarvamProxy] User profile language:", userLanguage, "->", userLanguageCode);
-    
     // Check for Sarvam API key
     const apiKey = process.env.SARVAM_API_KEY;
     if (!apiKey) {
@@ -218,9 +219,12 @@ const setupDeepgramWsProxy = (server) => {
     const url = clientWs.sarvamUrl;
     const language = (url?.searchParams?.get("language") || "en").trim();
     const wantsAutoLang = language.toLowerCase() === "auto";
+    const targetLanguageRaw = (url?.searchParams?.get("target_language") || url?.searchParams?.get("targetLanguage") || language).trim();
 
-    const sarvamLanguage = languageMap[language] || 'en-IN';
-    console.log("[SarvamProxy] Original language:", language, "-> mapped to:", sarvamLanguage);
+    const sarvamLanguage = normalizeSarvamLanguageCode(language, languageMap) || 'en-IN';
+    const targetLanguageCode = normalizeSarvamLanguageCode(targetLanguageRaw, languageMap) || sarvamLanguage;
+    console.log("[SarvamProxy] STT language:", language, "->", sarvamLanguage);
+    console.log("[SarvamProxy] Caption target language:", targetLanguageRaw, "->", targetLanguageCode);
 
     const sarvamUrl = `wss://api.sarvam.ai/speech-to-text/ws?model=saaras:v3&mode=verbatim&language-code=${encodeURIComponent(sarvamLanguage)}&sample_rate=16000&input_audio_codec=pcm_s16le`;
 
@@ -312,16 +316,16 @@ const setupDeepgramWsProxy = (server) => {
         // Handle transcription endpoint responses
         if (message.type === 'data' && message.data?.transcript) {
           const originalText = message.data.transcript;
-          const detectedLanguage = message.data.language_code;
+          const detectedLanguage = message.data.language_code || sarvamLanguage;
           
           console.log("[SarvamProxy] Forwarding transcript:", originalText);
           console.log("[SarvamProxy] Language detected:", detectedLanguage);
           
           // Only translate if the detected language is different from user's profile language
           let translatedText = null;
-          if (detectedLanguage && detectedLanguage !== userLanguageCode) {
-            console.log("[SarvamProxy] Translating from", detectedLanguage, "to", userLanguageCode);
-            translatedText = await translateText(originalText, detectedLanguage, userLanguageCode);
+          if (detectedLanguage && targetLanguageCode && detectedLanguage !== targetLanguageCode) {
+            console.log("[SarvamProxy] Translating from", detectedLanguage, "to", targetLanguageCode);
+            translatedText = await translateText(originalText, detectedLanguage, targetLanguageCode);
             if (translatedText) {
               console.log("[SarvamProxy] Translation result:", translatedText);
             }
@@ -333,7 +337,7 @@ const setupDeepgramWsProxy = (server) => {
             original_text: originalText,
             original_language: detectedLanguage,
             translated_text: translatedText,
-            translated_language: translatedText ? userLanguageCode : null,
+            translated_language: translatedText ? targetLanguageCode : null,
             is_final: true,
             language_code: detectedLanguage
           }));
@@ -341,16 +345,16 @@ const setupDeepgramWsProxy = (server) => {
         } else if (message.type === 'transcript' && message.data?.transcript) {
           // Alternative format for transcription endpoint
           const originalText = message.data.transcript;
-          const detectedLanguage = message.data.language_code;
+          const detectedLanguage = message.data.language_code || sarvamLanguage;
           
           console.log("[SarvamProxy] Forwarding transcript (alt format):", originalText);
           console.log("[SarvamProxy] Language detected:", detectedLanguage);
           
           // Only translate if the detected language is different from user's profile language
           let translatedText = null;
-          if (detectedLanguage && detectedLanguage !== userLanguageCode) {
-            console.log("[SarvamProxy] Translating from", detectedLanguage, "to", userLanguageCode);
-            translatedText = await translateText(originalText, detectedLanguage, userLanguageCode);
+          if (detectedLanguage && targetLanguageCode && detectedLanguage !== targetLanguageCode) {
+            console.log("[SarvamProxy] Translating from", detectedLanguage, "to", targetLanguageCode);
+            translatedText = await translateText(originalText, detectedLanguage, targetLanguageCode);
             if (translatedText) {
               console.log("[SarvamProxy] Translation result:", translatedText);
             }
@@ -362,7 +366,7 @@ const setupDeepgramWsProxy = (server) => {
             original_text: originalText,
             original_language: detectedLanguage,
             translated_text: translatedText,
-            translated_language: translatedText ? userLanguageCode : null,
+            translated_language: translatedText ? targetLanguageCode : null,
             is_final: true,
             language_code: detectedLanguage
           }));

@@ -317,7 +317,7 @@ const CaptionControls = ({
       ? origin.replace(/^https:\/\//, "wss://")
       : origin.replace(/^http:\/\//, "ws://");
 
-    const wsUrl = `${wsOrigin}/ws/deepgram?token=${encodeURIComponent(token)}&language=${encodeURIComponent(lang)}`;
+    const wsUrl = `${wsOrigin}/ws/deepgram?token=${encodeURIComponent(token)}&language=${encodeURIComponent(lang)}&target_language=${encodeURIComponent(lang)}`;
 
     let stopped = false;
 
@@ -639,73 +639,66 @@ const CaptionBar = ({
 }) => {
   const list = Array.isArray(captions) ? captions : [];
 
+  const originalList = list.filter((c) => c?.type !== "translation");
+  const translationList = list.filter((c) => c?.type === "translation");
+
+  const renderList = (items, emptyText) => {
+    if (!items.length) {
+      return (
+        <div className="flex items-center justify-center h-16 text-base-content/60 italic">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-warning rounded-full animate-pulse"></div>
+            <span>{emptyText}</span>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-2 max-h-[220px] overflow-y-auto">
+        {items.slice(-6).map((c, index) => (
+          <div
+            key={c.id}
+            className={`p-3 rounded-lg border bg-base-200/40 border-base-300/60 ${
+              index === items.slice(-6).length - 1 ? "ring-2 ring-primary/20" : ""
+            }`}
+          >
+            <div className="text-xs font-bold uppercase tracking-wide text-primary">
+              {c.speaker || "Speaker"}
+            </div>
+            <div className="mt-1 text-sm leading-relaxed text-base-content">{c.text}</div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
-    <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-30 w-full max-w-3xl px-4">
-      <div className="bg-base-100/95 backdrop-blur-md rounded-2xl border-2 border-primary/30 shadow-2xl p-4">
+    <div className="w-full px-4 pb-2">
+      <div className="bg-base-100/90 backdrop-blur-md rounded-2xl border border-base-300 shadow-lg p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 bg-success rounded-full animate-pulse"></div>
-            <span className="text-sm font-bold text-primary">Live Captions with Translation</span>
+            <span className="text-sm font-bold text-primary">Captions</span>
           </div>
-          <span className="text-xs text-base-content/60">
-            {list.length} {list.length === 1 ? 'line' : 'lines'}
-          </span>
+          <span className="text-xs text-base-content/60">{list.length} lines</span>
         </div>
-        
-        <div className="space-y-2 min-h-[80px] max-h-[300px] overflow-y-auto">
-          {list.length ? (
-            list.slice(-5).map((c, index) => (
-              <div 
-                key={c.id} 
-                className={`p-3 rounded-lg border ${
-                  c.type === 'translation' 
-                    ? 'bg-info/10 border-info/30' 
-                    : 'bg-base-200/50 border-base-300/50'
-                } ${
-                  index === list.slice(-5).length - 1 ? 'ring-2 ring-primary/20' : ''
-                }`}
-              >
-                <div className="flex items-start gap-2">
-                  {c.speaker ? (
-                    <span className={`text-xs font-bold uppercase tracking-wide ${
-                      c.type === 'translation' ? 'text-info' : 'text-primary'
-                    }`}>
-                      {c.speaker}
-                      {c.type === 'translation' && (
-                        <span className="ml-1 text-xs opacity-70">(Translation)</span>
-                      )}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="mt-1">
-                  <span className={`text-sm leading-relaxed ${
-                    c.type === 'translation' ? 'text-info font-medium' : 'text-base-content'
-                  }`}>
-                    {c.text}
-                  </span>
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="flex items-center justify-center h-16 text-base-content/60 italic">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 bg-warning rounded-full animate-pulse"></div>
-                <span>Listening for speech...</span>
-              </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="rounded-xl border border-primary/20 bg-primary/5 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs font-bold uppercase tracking-wide text-primary">Original</div>
+              <div className="text-xs text-base-content/60">{originalList.length}</div>
             </div>
-          )}
-        </div>
-        
-        <div className="mt-3 pt-2 border-t border-base-300/50">
-          <div className="flex items-center justify-center gap-4 text-xs text-base-content/60">
-            <div className="flex items-center gap-1">
-              <div className="w-2 h-2 bg-primary rounded-full"></div>
-              <span>Original</span>
+            {renderList(originalList, "Waiting for speech...")}
+          </div>
+
+          <div className="rounded-xl border border-info/30 bg-info/5 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs font-bold uppercase tracking-wide text-info">Translation</div>
+              <div className="text-xs text-base-content/60">{translationList.length}</div>
             </div>
-            <div className="flex items-center gap-1">
-              <div className="w-2 h-2 bg-info rounded-full"></div>
-              <span>Translation</span>
-            </div>
+            {renderList(translationList, "Waiting for translation...")}
           </div>
         </div>
       </div>
