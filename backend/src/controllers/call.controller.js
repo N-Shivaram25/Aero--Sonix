@@ -63,7 +63,7 @@ export async function deepgramStt(req, res) {
     const mimetype = String(file.mimetype || "application/octet-stream");
 
     const url = new URL("https://api.deepgram.com/v1/listen");
-    url.searchParams.set("model", "nova-2");
+    url.searchParams.set("model", "nova-3");
     url.searchParams.set("smart_format", "true");
     url.searchParams.set("punctuate", "true");
     if (language) url.searchParams.set("language", language);

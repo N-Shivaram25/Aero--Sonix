@@ -163,6 +163,7 @@ export const THEMES = [
 ];
 
 export const LANGUAGES = [
+  "Auto",
   "English",
   "Telugu",
   "Spanish",

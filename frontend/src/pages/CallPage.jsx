@@ -201,6 +201,7 @@ const CaptionControls = ({
 
   const toDeepgramLanguage = (languageKey) => {
     const key = String(languageKey || "").trim().toLowerCase();
+    if (key === "auto") return "auto";
     const map = {
       english: "en",
       telugu: "te",
@@ -321,10 +322,16 @@ const CaptionControls = ({
     const start = async () => {
       try {
         let stream;
-        const audioTrack = call?.state?.localParticipant?.publishedTracks?.audio?.track;
-        console.log("[Captions] Stream audio track:", !!audioTrack);
-        if (audioTrack) {
-          stream = new MediaStream([audioTrack]);
+        const publishedAudio = call?.state?.localParticipant?.publishedTracks?.audio?.track;
+        const maybeMediaStreamTrack = publishedAudio?.mediaStreamTrack || publishedAudio;
+        const isUsableTrack =
+          !!maybeMediaStreamTrack &&
+          typeof maybeMediaStreamTrack === "object" &&
+          maybeMediaStreamTrack.readyState !== "ended";
+        console.log("[Captions] Stream audio track:", !!publishedAudio);
+
+        if (isUsableTrack) {
+          stream = new MediaStream([maybeMediaStreamTrack]);
         } else {
           toast.error("Captions: Stream mic track not found, using device mic");
           stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -433,9 +440,6 @@ const CaptionControls = ({
       }
 
       try {
-        if (socketRef.current?.readyState === WebSocket.OPEN) {
-          socketRef.current.send(JSON.stringify({ type: "CloseStream" }));
-        }
         socketRef.current?.close?.();
       } catch {
       }

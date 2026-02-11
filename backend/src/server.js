@@ -148,7 +148,7 @@ const setupDeepgramWsProxy = (server) => {
       } catch {
       }
       try {
-        clientWs.close();
+        clientWs.close(1011, "DEEPGRAM_API_KEY is not set");
       } catch {
       }
       return;
@@ -156,16 +156,18 @@ const setupDeepgramWsProxy = (server) => {
 
     const url = clientWs.deepgramUrl;
     const language = (url?.searchParams?.get("language") || "en").trim();
+    const wantsAutoLang = language.toLowerCase() === "auto";
 
     const dgUrl =
-      `wss://api.deepgram.com/v1/listen?model=nova-2&punctuate=true&smart_format=true` +
-      `&interim_results=true&language=${encodeURIComponent(language)}` +
+      `wss://api.deepgram.com/v1/listen?model=nova-3&punctuate=true&smart_format=true` +
+      `&interim_results=true` +
+      (wantsAutoLang ? `&detect_language=true` : `&language=${encodeURIComponent(language)}`) +
       `&encoding=linear16&sample_rate=16000&channels=1`;
 
     const dgWs = new WebSocket(dgUrl, ["token", apiKey]);
 
     let closed = false;
-    const cleanup = () => {
+    const cleanup = (reason) => {
       if (closed) return;
       closed = true;
       try {
@@ -173,7 +175,7 @@ const setupDeepgramWsProxy = (server) => {
       } catch {
       }
       try {
-        clientWs.close();
+        clientWs.close(1011, reason || "Deepgram connection closed");
       } catch {
       }
     };
@@ -187,8 +189,11 @@ const setupDeepgramWsProxy = (server) => {
       }
     });
 
-    dgWs.on("close", () => cleanup());
-    dgWs.on("error", () => cleanup());
+    dgWs.on("close", (code, reason) => {
+      const msg = reason ? reason.toString() : "Deepgram socket closed";
+      cleanup(`${msg} (${code || "no_code"})`);
+    });
+    dgWs.on("error", () => cleanup("Deepgram socket error"));
 
     clientWs.on("message", (chunk) => {
       if (closed) return;
@@ -196,12 +201,12 @@ const setupDeepgramWsProxy = (server) => {
       try {
         dgWs.send(chunk);
       } catch {
-        cleanup();
+        cleanup("Failed to forward audio to Deepgram");
       }
     });
 
-    clientWs.on("close", () => cleanup());
-    clientWs.on("error", () => cleanup());
+    clientWs.on("close", () => cleanup("Client disconnected"));
+    clientWs.on("error", () => cleanup("Client socket error"));
   });
 };
 
