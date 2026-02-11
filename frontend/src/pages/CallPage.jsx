@@ -325,17 +325,44 @@ const CaptionControls = ({
       try {
         try {
           await call?.microphone?.enable?.();
+          // Add a small delay to ensure microphone is properly initialized
+          await new Promise(resolve => setTimeout(resolve, 500));
         } catch {
         }
 
         let stream;
-        const publishedAudio = call?.state?.localParticipant?.publishedTracks?.audio?.track;
-        const maybeMediaStreamTrack = publishedAudio?.mediaStreamTrack || publishedAudio;
+        // Try multiple approaches to get the microphone track from Stream
+        let publishedAudio = null;
+        let maybeMediaStreamTrack = null;
+        
+        // Method 1: Try microphone state
+        const microphoneState = call?.microphone?.state;
+        console.log("[Captions] Microphone state:", microphoneState);
+        
+        if (microphoneState?.mediaStream) {
+          publishedAudio = microphoneState.mediaStream;
+          maybeMediaStreamTrack = publishedAudio.getAudioTracks()?.[0];
+        } else if (microphoneState?.track) {
+          publishedAudio = microphoneState.track;
+          maybeMediaStreamTrack = publishedAudio;
+        }
+        
+        // Method 2: Try accessing through call participants
+        if (!maybeMediaStreamTrack) {
+          const localParticipant = call?.state?.localParticipant;
+          console.log("[Captions] Local participant:", localParticipant);
+          
+          if (localParticipant?.microphone?.track) {
+            maybeMediaStreamTrack = localParticipant.microphone.track;
+          }
+        }
+        
         const isUsableTrack =
           !!maybeMediaStreamTrack &&
           typeof maybeMediaStreamTrack === "object" &&
           maybeMediaStreamTrack.readyState !== "ended";
-        console.log("[Captions] Stream audio track:", !!publishedAudio);
+          
+        console.log("[Captions] Stream audio track:", !!publishedAudio, "Track usable:", isUsableTrack, "Track state:", maybeMediaStreamTrack?.readyState);
 
         if (isUsableTrack) {
           stream = new MediaStream([maybeMediaStreamTrack]);
@@ -352,49 +379,70 @@ const CaptionControls = ({
 
         const ws = new WebSocket(wsUrl);
         socketRef.current = ws;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 3;
 
-        ws.onopen = () => {
-          console.log("[Captions] WS open");
+        const connectWebSocket = () => {
+          if (reconnectAttempts >= maxReconnectAttempts || stopped) return;
+          
+          const newWs = new WebSocket(wsUrl);
+          socketRef.current = newWs;
+          
+          newWs.onopen = () => {
+            console.log("[Captions] WS open");
+            reconnectAttempts = 0; // Reset on successful connection
+          };
+
+          newWs.onclose = (e) => {
+            console.log("[Captions] WS close", e?.code, e?.reason);
+            
+            // Attempt to reconnect if it's an abnormal closure and we haven't exceeded attempts
+            if (e?.code !== 1000 && reconnectAttempts < maxReconnectAttempts && !stopped) {
+              reconnectAttempts++;
+              console.log(`[Captions] Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts})`);
+              setTimeout(connectWebSocket, 1000 * reconnectAttempts); // Exponential backoff
+            }
+          };
+
+          newWs.onerror = (e) => {
+            console.log("[Captions] WS error", e);
+            if (reconnectAttempts === 0) { // Only show toast on first error
+              toast.error("Captions: WebSocket connection failed");
+            }
+          };
+
+          newWs.onmessage = (evt) => {
+            if (stopped) return;
+            scheduleSilenceFlush();
+
+            let data;
+            try {
+              data = JSON.parse(evt.data);
+            } catch {
+              return;
+            }
+
+            const transcript =
+              data?.channel?.alternatives?.[0]?.transcript ||
+              data?.channel?.alternatives?.[0]?.paragraphs?.transcript ||
+              "";
+
+            if (!String(transcript || "").trim()) return;
+
+            const isFinal =
+              data?.is_final === true ||
+              data?.speech_final === true ||
+              data?.type === "Results";
+
+            interimRef.current = String(transcript || "");
+
+            if (isFinal) {
+              flushInterimAsLine();
+            }
+          };
         };
 
-        ws.onclose = (e) => {
-          console.log("[Captions] WS close", e?.code, e?.reason);
-        };
-
-        ws.onerror = (e) => {
-          console.log("[Captions] WS error", e);
-          toast.error("Captions: WebSocket connection failed");
-        };
-
-        ws.onmessage = (evt) => {
-          if (stopped) return;
-          scheduleSilenceFlush();
-
-          let data;
-          try {
-            data = JSON.parse(evt.data);
-          } catch {
-            return;
-          }
-
-          const transcript =
-            data?.channel?.alternatives?.[0]?.transcript ||
-            data?.channel?.alternatives?.[0]?.paragraphs?.transcript ||
-            "";
-
-          if (!String(transcript || "").trim()) return;
-
-          const isFinal =
-            data?.is_final === true ||
-            data?.speech_final === true ||
-            data?.type === "Results";
-
-          interimRef.current = String(transcript || "");
-
-          if (isFinal) {
-            flushInterimAsLine();
-          }
-        };
+        connectWebSocket();
 
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (!AudioCtx) return;
@@ -414,14 +462,15 @@ const CaptionControls = ({
 
         processor.onaudioprocess = (e) => {
           if (stopped) return;
-          if (ws.readyState !== WebSocket.OPEN) return;
+          const currentWs = socketRef.current;
+          if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return;
 
           const input = e.inputBuffer.getChannelData(0);
           const down = downsampleBuffer(input, audioCtx.sampleRate, 16000);
           const pcm16 = floatTo16BitPCM(down);
 
           try {
-            ws.send(pcm16);
+            currentWs.send(pcm16);
           } catch {
           }
         };
@@ -456,8 +505,20 @@ const CaptionControls = ({
       }
 
       try {
-        const usedStreamTrack = call?.state?.localParticipant?.publishedTracks?.audio?.track;
-        if (!usedStreamTrack) {
+        // Check if we're using Stream's microphone or a fallback
+        const microphoneState = call?.microphone?.state;
+        let hasStreamTrack = false;
+        
+        if (microphoneState?.mediaStream) {
+          hasStreamTrack = microphoneState.mediaStream.getAudioTracks()?.length > 0;
+        } else if (microphoneState?.track) {
+          hasStreamTrack = microphoneState.track.readyState !== "ended";
+        } else {
+          const localParticipant = call?.state?.localParticipant;
+          hasStreamTrack = localParticipant?.microphone?.track?.readyState !== "ended";
+        }
+        
+        if (!hasStreamTrack) {
           for (const t of micStreamRef.current?.getTracks?.() || []) t.stop();
         }
       } catch {
