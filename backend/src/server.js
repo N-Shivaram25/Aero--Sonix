@@ -161,9 +161,9 @@ const setupDeepgramWsProxy = (server) => {
 
     const dgUrl =
       `wss://api.deepgram.com/v1/listen?model=nova-2&punctuate=true&smart_format=true` +
-      `&interim_results=true&utterance_end=true` +
+      `&interim_results=true` +
       (wantsAutoLang ? `&detect_language=true` : `&language=${encodeURIComponent(language)}`) +
-      `&encoding=linear16&sample_rate=16000&channels=1&endpointing=200`;
+      `&encoding=linear16&sample_rate=16000&channels=1&endpointing=200&utterance_end_ms=1000`;
 
     console.log("[DeepgramProxy] Connecting to Deepgram with URL:", dgUrl.replace(/token=[^&]*/, "token=REDACTED"));
     const dgWs = new WebSocket(dgUrl, {
@@ -243,12 +243,33 @@ const setupDeepgramWsProxy = (server) => {
     });
 
     dgWs.on("unexpected-response", (req, res) => {
-      console.log("[DeepgramProxy] deepgram unexpected-response", res?.statusCode);
+      const dgRequestId = res?.headers?.["dg-request-id"];
+      const dgError = res?.headers?.["dg-error"];
+      console.log(
+        "[DeepgramProxy] deepgram unexpected-response",
+        res?.statusCode,
+        "dg-request-id:",
+        dgRequestId,
+        "dg-error:",
+        dgError
+      );
+
+      try {
+        let body = "";
+        res.on("data", (chunk) => {
+          body += chunk.toString("utf8");
+        });
+        res.on("end", () => {
+          if (body) console.log("[DeepgramProxy] deepgram unexpected-response body", body);
+        });
+      } catch {
+      }
+
       try {
         clientWs.send(
           JSON.stringify({
             type: "error",
-            message: `Deepgram unexpected response: ${res?.statusCode || "unknown"}`,
+            message: `Deepgram unexpected response: ${res?.statusCode || "unknown"}${dgError ? ` (${dgError})` : ""}`,
           })
         );
       } catch {
