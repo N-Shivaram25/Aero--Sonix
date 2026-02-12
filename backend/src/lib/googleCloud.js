@@ -1,5 +1,7 @@
 import speech from '@google-cloud/speech';
-import { Translate } from '@google-cloud/translate';
+import pkg from '@google-cloud/translate';
+const { v2 } = pkg;
+const { Translate } = v2;
 
 // Google Cloud language mapping
 const googleCloudLanguageMap = {
