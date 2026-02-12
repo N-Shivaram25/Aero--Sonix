@@ -176,6 +176,7 @@ const CallContent = ({ callId }) => {
       <CaptionControls
         callId={callId}
         authUser={authUser}
+        peerMeta={peerMeta}
         captionsEnabled={captionsEnabled}
         setCaptionsEnabled={setCaptionsEnabled}
         spokenLanguage={spokenLanguage}
@@ -200,6 +201,7 @@ const CallContent = ({ callId }) => {
 const CaptionControls = ({
   callId,
   authUser,
+  peerMeta,
   captionsEnabled,
   setCaptionsEnabled,
   spokenLanguage,
