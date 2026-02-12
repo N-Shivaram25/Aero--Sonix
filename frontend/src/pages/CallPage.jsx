@@ -942,6 +942,9 @@ const CaptionBar = ({
     latestCaption?.speaker_profile_language_raw ||
     meta?.speaker_profile_language_raw ||
     "Unknown";
+    
+  // Get opponent's language for display
+  const opponentLang = peerMeta?.nativeLanguage || "Unknown";
   const targetLang =
     latestCaption?.target_language_raw ||
     meta?.target_language_raw ||
@@ -956,7 +959,7 @@ const CaptionBar = ({
             <span className="text-sm font-bold text-primary">Live Captions</span>
           </div>
           <div className="flex items-center gap-2 text-xs text-base-content/60">
-            <span>Speaker: {speakerLang}</span>
+            <span>{peerMeta?.fullName || "Opponent"} ({opponentLang})</span>
             <span>→</span>
             <span>Target: {targetLang}</span>
           </div>
@@ -966,7 +969,7 @@ const CaptionBar = ({
           <div className="rounded-xl border border-primary/20 bg-primary/5 p-3">
             <div className="flex items-center justify-between mb-2">
               <div className="text-xs font-bold uppercase tracking-wide text-primary">
-                Original ({speakerLang})
+                Original ({opponentLang})
               </div>
               <div className="text-xs text-base-content/60">{originalList.length}</div>
             </div>

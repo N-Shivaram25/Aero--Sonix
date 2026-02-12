@@ -368,11 +368,6 @@ const setupGoogleCloudWsProxy = (server) => {
         const request = {
           config: config,
           interimResults: true,
-          enableVoiceActivityEvents: true,
-          voiceActivityTimeout: {
-            speechStartTimeout: 2000,
-            speechEndTimeout: 2000
-          }
         };
         
         recognizeStream = sttService.speechClient.streamingRecognize(request)
@@ -382,10 +377,12 @@ const setupGoogleCloudWsProxy = (server) => {
               clientWs.send(JSON.stringify({ type: "error", message: `Recognition error: ${error.message}` }));
             } catch {
             }
-            // Restart recognition on error
-            if (!closed) {
-              setTimeout(startRecognition, 2000);
+            // Properly destroy stream to prevent further writes
+            if (recognizeStream && !recognizeStream.destroyed) {
+              recognizeStream.destroy();
             }
+            // Restart recognition on error
+            setTimeout(startRecognition, 2000);
           })
           .on('data', async (data) => {
             if (closed) return;
@@ -491,7 +488,7 @@ const setupGoogleCloudWsProxy = (server) => {
           
           // Process audio in chunks (send every 100ms of audio)
           if (audioBuffer.length >= 3200) { // 16000 samples/sec * 2 bytes/sample * 0.1 sec
-            if (recognizeStream && recognizeStream.writable) {
+            if (recognizeStream && recognizeStream.writable && !recognizeStream.destroyed) {
               recognizeStream.write({
                 audio: audioBuffer
               });
