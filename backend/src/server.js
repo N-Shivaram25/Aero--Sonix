@@ -41,13 +41,22 @@ const allowedOrigins = [
   ...frontendEnvOrigins,
   "http://localhost:5173",
   "http://127.0.0.1:5173",
+  "https://aero-sonix-stream.vercel.app",
 ].map(normalizeOrigin);
 
 const corsOptions = {
-  // Reflect request Origin in Access-Control-Allow-Origin.
-  // This is required when using cookies across different domains.
-  // NOTE: Auth-protected APIs + cookies still protect access.
-  origin: true,
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('CORS: Origin not allowed:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true, // allow frontend to send cookies
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
@@ -124,6 +133,30 @@ const setupGoogleCloudWsProxy = (server) => {
 
   const callRooms = new Map();
 
+  // Set up ping interval to detect dead connections
+  const pingInterval = setInterval(() => {
+    wss.clients.forEach((ws) => {
+      if (!ws.isAlive) {
+        console.log('[WebSocket] Terminating dead connection');
+        ws.terminate();
+        return;
+      }
+      
+      ws.isAlive = false;
+      try {
+        ws.ping();
+      } catch (error) {
+        console.error('[WebSocket] Error sending ping:', error);
+        ws.terminate();
+      }
+    });
+  }, 30000); // 30 seconds
+
+  // Clean up ping interval on server close
+  wss.on('close', () => {
+    clearInterval(pingInterval);
+  });
+
   const getRoom = (callId) => {
     const key = String(callId || "").trim();
     if (!key) return null;
@@ -141,28 +174,47 @@ const setupGoogleCloudWsProxy = (server) => {
   server.on("upgrade", async (req, socket, head) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host}`);
-      if (url.pathname !== "/ws/google-cloud") return;
+      console.log('[WebSocket] Upgrade request for:', url.pathname);
+      
+      if (url.pathname !== "/ws/google-cloud") {
+        console.log('[WebSocket] Not handling path:', url.pathname);
+        return;
+      }
 
       const token = url.searchParams.get("token") || "";
+      console.log('[WebSocket] Token present:', !!token);
+      
       const user = await getUserFromToken(token);
       if (!user) {
+        console.log('[WebSocket] Invalid token, closing connection');
         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
         socket.destroy();
         return;
       }
 
+      console.log('[WebSocket] User authenticated:', user.fullName);
+      
       wss.handleUpgrade(req, socket, head, (ws) => {
         ws.user = user;
         ws.gladiaUrl = url;
+        console.log('[WebSocket] WebSocket upgraded successfully');
         wss.emit("connection", ws, req);
       });
-    } catch {
+    } catch (error) {
+      console.error('[WebSocket] Error during upgrade:', error);
+      socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n");
       socket.destroy();
     }
   });
 
   wss.on("connection", async (clientWs) => {
-    console.log("[GoogleCloudProxy] client connected");
+    console.log("[GoogleCloudProxy] Client connected");
+    
+    // Set up ping/pong to keep connection alive
+    clientWs.isAlive = true;
+    clientWs.on('pong', () => {
+      clientWs.isAlive = true;
+    });
     
     // Get current user's profile language (this is the speaker)
     const speaker = clientWs.user;
@@ -173,13 +225,25 @@ const setupGoogleCloudWsProxy = (server) => {
     
     const url = clientWs.gladiaUrl;
     const callId = String(url?.searchParams?.get("callId") || url?.searchParams?.get("call_id") || "").trim();
-    const room = getRoom(callId);
-    if (!room) {
+    
+    if (!callId) {
+      console.error("[GoogleCloudProxy] Missing callId in WebSocket URL");
       try {
         clientWs.send(JSON.stringify({ type: "error", message: "Missing callId" }));
       } catch {
       }
       clientWs.close(1008, "Missing callId");
+      return;
+    }
+    
+    const room = getRoom(callId);
+    if (!room) {
+      console.error("[GoogleCloudProxy] Could not create room for callId:", callId);
+      try {
+        clientWs.send(JSON.stringify({ type: "error", message: "Could not create room" }));
+      } catch {
+      }
+      clientWs.close(1008, "Could not create room");
       return;
     }
 
@@ -189,6 +253,15 @@ const setupGoogleCloudWsProxy = (server) => {
     const myUserId = String(speaker?._id || speaker?.id || "");
     const myUserName = String(speaker?.fullName || "");
 
+    console.log("[GoogleCloudProxy] User joined room:", {
+      callId,
+      userId: myUserId,
+      userName: myUserName,
+      speakerLanguage: speakerLanguageRaw,
+      targetLanguage: myTargetLanguageRaw
+    });
+
+    // Notify existing participants about new user
     for (const [, peer] of room.entries()) {
       try {
         clientWs.send(
@@ -199,10 +272,12 @@ const setupGoogleCloudWsProxy = (server) => {
             nativeLanguage: peer.nativeLanguage,
           })
         );
-      } catch {
+      } catch (error) {
+        console.error("[GoogleCloudProxy] Error sending peer info to new client:", error);
       }
     }
 
+    // Notify existing participants about new user
     for (const [, peer] of room.entries()) {
       try {
         peer.ws.send(
@@ -213,7 +288,8 @@ const setupGoogleCloudWsProxy = (server) => {
             nativeLanguage: speakerLanguageRaw,
           })
         );
-      } catch {
+      } catch (error) {
+        console.error("[GoogleCloudProxy] Error notifying peer about new user:", error);
       }
     }
 
@@ -226,8 +302,7 @@ const setupGoogleCloudWsProxy = (server) => {
       ws: clientWs,
     });
 
-    console.log("[GoogleCloudProxy] callId:", callId);
-    console.log("[GoogleCloudProxy] My target language for receiving translations:", myTargetLanguageRaw, "->", myTargetLanguageCode);
+    console.log("[GoogleCloudProxy] Room participants:", room.size);
 
     try {
       clientWs.send(
@@ -240,7 +315,8 @@ const setupGoogleCloudWsProxy = (server) => {
           call_id: callId,
         })
       );
-    } catch {
+    } catch (error) {
+      console.error("[GoogleCloudProxy] Error sending meta info:", error);
     }
 
     // Initialize Google Cloud services

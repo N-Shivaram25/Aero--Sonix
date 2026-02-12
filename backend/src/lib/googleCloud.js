@@ -193,22 +193,70 @@ class GoogleCloudSTT {
 
 class GoogleCloudTranslation {
   constructor() {
+    console.log('[GoogleCloudTranslation] Initializing translation service...');
+    
+    // Check for API key first
     const apiKey = process.env.GOOGLE_CLOUD_API_KEY;
-    this.translateClient = apiKey
-      ? new translate.v2.Translate({
-          apiKey,
-          projectId: process.env.GOOGLE_CLOUD_PROJECT_ID || 'default-project'
-        })
-      : new translate.v2.Translate({
-          projectId: process.env.GOOGLE_CLOUD_PROJECT_ID || 'default-project'
+    if (apiKey) {
+      console.log('[GoogleCloudTranslation] Using API key authentication');
+      this.translateClient = new translate.v2.Translate({
+        apiKey,
+        projectId: process.env.GOOGLE_CLOUD_PROJECT_ID || 'aero-sonix'
+      });
+    } else {
+      console.log('[GoogleCloudTranslation] Using service account authentication');
+      // Try service account authentication
+      try {
+        this.translateClient = new translate.v2.Translate({
+          projectId: process.env.GOOGLE_CLOUD_PROJECT_ID || 'aero-sonix'
         });
+      } catch (error) {
+        console.error('[GoogleCloudTranslation] Failed to initialize with service account:', error);
+        throw new Error('Failed to initialize Google Cloud Translation client. Please check credentials.');
+      }
+    }
   }
 
   async listSupportedLanguages(target = 'en') {
-    const normalizedTarget = normalizeLanguageCode(target) || 'en';
-    const googleTargetCode = translationLanguageMap[normalizedTarget] || 'en';
-    const [langs] = await this.translateClient.getLanguages(googleTargetCode);
-    return Array.isArray(langs) ? langs : [];
+    try {
+      console.log('[GoogleCloudTranslation] Listing supported languages for target:', target);
+      
+      const normalizedTarget = normalizeLanguageCode(target) || 'en';
+      const googleTargetCode = translationLanguageMap[normalizedTarget] || 'en';
+      
+      console.log('[GoogleCloudTranslation] Using Google target code:', googleTargetCode);
+      
+      const [langs] = await this.translateClient.getLanguages(googleTargetCode);
+      
+      if (!Array.isArray(langs)) {
+        console.error('[GoogleCloudTranslation] Invalid response from Google Cloud:', langs);
+        throw new Error('Invalid response from Google Cloud Translation API');
+      }
+      
+      console.log('[GoogleCloudTranslation] Successfully retrieved', langs.length, 'languages');
+      
+      // Transform the response to include both name and code
+      const transformedLanguages = langs.map(lang => ({
+        code: lang.code || lang.language,
+        name: lang.name || lang.displayName || lang.code,
+        language: lang.code || lang.language
+      }));
+      
+      return transformedLanguages;
+    } catch (error) {
+      console.error('[GoogleCloudTranslation] Error in listSupportedLanguages:', error);
+      
+      // Handle specific Google Cloud errors
+      if (error.code === 7) {
+        throw new Error('Google Cloud API key invalid or missing permissions');
+      } else if (error.code === 3) {
+        throw new Error('Invalid target language parameter');
+      } else if (error.code === 8) {
+        throw new Error('Google Cloud quota exceeded. Please check billing.');
+      } else {
+        throw new Error(`Google Cloud Translation error: ${error.message}`);
+      }
+    }
   }
 
   async translateText(text, targetLanguage, sourceLanguage = null) {

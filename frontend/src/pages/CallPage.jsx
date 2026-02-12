@@ -223,12 +223,23 @@ const CaptionControls = ({
   const fetchSupportedLanguages = useCallback(async () => {
     setLoadingLanguages(true);
     try {
+      console.log('[Captions] Fetching supported languages...');
       const res = await getSupportedTranslationLanguages({ target: "en" });
       const items = Array.isArray(res?.languages) ? res.languages : [];
+      
+      if (items.length === 0) {
+        console.warn('[Captions] No languages received from API');
+        toast.error("No supported languages available");
+        return;
+      }
+      
       items.sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || "")));
       setSupportedLanguages(items);
-    } catch {
-      toast.error("Failed to fetch supported languages");
+      console.log(`[Captions] Loaded ${items.length} supported languages`);
+    } catch (error) {
+      console.error('[Captions] Error fetching supported languages:', error);
+      const errorMessage = error?.response?.data?.message || error?.message || "Failed to fetch supported languages";
+      toast.error(errorMessage);
     } finally {
       setLoadingLanguages(false);
     }
@@ -584,49 +595,108 @@ const CaptionControls = ({
           console.error("[Captions] Error resuming AudioContext:", error);
         }
 
-        const source = audioCtx.createMediaStreamSource(stream);
-        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-        processorRef.current = processor;
-        
-        console.log("[Captions] Audio processor created, buffer size:", processor.bufferSize);
-        
-        source.connect(processor);
-        processor.connect(audioCtx.destination);
-        
-        console.log("[Captions] Audio nodes connected");
-
-        processor.onaudioprocess = (e) => {
-          if (stopped) return;
-          const currentWs = socketRef.current;
-          if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return;
-
-          const input = e.inputBuffer.getChannelData(0);
+        // Try to use AudioWorklet (modern approach)
+        try {
+          console.log("[Captions] Loading AudioWorklet processor...");
+          await audioCtx.audioWorklet.addModule('/audio-processor.js');
           
-          // Check if input has actual audio data (not all zeros)
-          let hasAudio = false;
-          for (let i = 0; i < Math.min(100, input.length); i++) {
-            if (Math.abs(input[i]) > 0.001) {
-              hasAudio = true;
-              break;
+          const source = audioCtx.createMediaStreamSource(stream);
+          const workletNode = new AudioWorkletNode(audioCtx, 'audio-processor', {
+            processorOptions: {
+              bufferSize: 4096
             }
-          }
+          });
           
-          // Always send audio data to keep Deepgram connection alive
-          const down = downsampleBuffer(input, audioCtx.sampleRate, 16000);
-          const pcm16 = floatTo16BitPCM(down);
-
-          try {
-            currentWs.send(pcm16);
-            audioChunkCount++;
+          processorRef.current = workletNode;
+          
+          source.connect(workletNode);
+          workletNode.connect(audioCtx.destination);
+          
+          console.log("[Captions] AudioWorklet nodes connected");
+          
+          workletNode.port.onmessage = (event) => {
+            if (stopped) return;
+            const currentWs = socketRef.current;
+            if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return;
             
-            // Log every 50 chunks (approximately every 2 seconds)
-            if (audioChunkCount % 50 === 0) {
-              console.log("[Captions] Sent audio chunk #" + audioChunkCount + ", size: " + pcm16.byteLength + ", hasAudio: " + hasAudio + ", type: " + pcm16.constructor.name);
+            if (event.data.type === 'audio-data') {
+              const inputBuffer = event.data.buffer;
+              
+              // Check if input has actual audio data (not all zeros)
+              let hasAudio = false;
+              for (let i = 0; i < Math.min(100, inputBuffer.length); i++) {
+                if (Math.abs(inputBuffer[i]) > 0.001) {
+                  hasAudio = true;
+                  break;
+                }
+              }
+              
+              // Always send audio data to keep connection alive
+              const down = downsampleBuffer(inputBuffer, audioCtx.sampleRate, 16000);
+              const pcm16 = floatTo16BitPCM(down);
+
+              try {
+                currentWs.send(pcm16);
+                audioChunkCount++;
+                
+                // Log every 50 chunks (approximately every 2 seconds)
+                if (audioChunkCount % 50 === 0) {
+                  console.log("[Captions] Sent audio chunk #" + audioChunkCount + ", size: " + pcm16.byteLength + ", hasAudio: " + hasAudio + ", type: " + pcm16.constructor.name);
+                }
+              } catch (error) {
+                console.error("[Captions] Error sending audio:", error);
+              }
             }
-          } catch (error) {
-            console.error("[Captions] Error sending audio:", error);
-          }
-        };
+          };
+          
+        } catch (workletError) {
+          console.warn("[Captions] AudioWorklet failed, falling back to ScriptProcessorNode:", workletError);
+          
+          // Fallback to ScriptProcessorNode (deprecated but more compatible)
+          const source = audioCtx.createMediaStreamSource(stream);
+          const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+          processorRef.current = processor;
+          
+          console.log("[Captions] Using fallback ScriptProcessorNode, buffer size:", processor.bufferSize);
+          
+          source.connect(processor);
+          processor.connect(audioCtx.destination);
+          
+          console.log("[Captions] Audio nodes connected (fallback)");
+
+          processor.onaudioprocess = (e) => {
+            if (stopped) return;
+            const currentWs = socketRef.current;
+            if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return;
+
+            const input = e.inputBuffer.getChannelData(0);
+            
+            // Check if input has actual audio data (not all zeros)
+            let hasAudio = false;
+            for (let i = 0; i < Math.min(100, input.length); i++) {
+              if (Math.abs(input[i]) > 0.001) {
+                hasAudio = true;
+                break;
+              }
+            }
+            
+            // Always send audio data to keep connection alive
+            const down = downsampleBuffer(input, audioCtx.sampleRate, 16000);
+            const pcm16 = floatTo16BitPCM(down);
+
+            try {
+              currentWs.send(pcm16);
+              audioChunkCount++;
+              
+              // Log every 50 chunks (approximately every 2 seconds)
+              if (audioChunkCount % 50 === 0) {
+                console.log("[Captions] Sent audio chunk #" + audioChunkCount + ", size: " + pcm16.byteLength + ", hasAudio: " + hasAudio + ", type: " + pcm16.constructor.name);
+              }
+            } catch (error) {
+              console.error("[Captions] Error sending audio:", error);
+            }
+          };
+        }
       } catch {
         toast.error("Captions: could not start audio capture");
       }
@@ -698,7 +768,14 @@ const CaptionControls = ({
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-base-content/70">Opponent:</span>
         <div className="flex-1 text-xs text-base-content/70">
-          {peerMeta?.fullName ? `${peerMeta.fullName} (${peerMeta.nativeLanguage || "Unknown"})` : "Waiting..."}
+          {peerMeta?.fullName ? (
+            <div className="flex items-center gap-1">
+              <span className="font-semibold">{peerMeta.fullName}</span>
+              <span className="text-primary">({peerMeta.nativeLanguage || "Unknown"})</span>
+            </div>
+          ) : (
+            <span className="italic">Waiting for opponent to join...</span>
+          )}
         </div>
       </div>
       
@@ -707,20 +784,30 @@ const CaptionControls = ({
         <div className="relative flex-1">
           <button
             type="button"
-            className="btn btn-sm btn-outline w-full justify-between"
+            className={`btn btn-sm w-full justify-between ${loadingLanguages ? 'btn-disabled' : 'btn-outline'}`}
             onClick={async () => {
               const next = !languagesOpen;
               setLanguagesOpen(next);
-              if (next && supportedLanguages.length === 0) {
+              if (next && supportedLanguages.length === 0 && !loadingLanguages) {
                 await fetchSupportedLanguages();
               }
             }}
+            disabled={loadingLanguages}
           >
             <span className="truncate">
-              {targetLanguage ? `Language 2: ${targetLanguage}` : "Select Language 2"}
+              {loadingLanguages ? (
+                <span className="flex items-center gap-2">
+                  <span className="loading loading-spinner loading-xs"></span>
+                  Loading languages...
+                </span>
+              ) : targetLanguage ? (
+                `Language 2: ${targetLanguage}`
+              ) : (
+                "Select Language 2"
+              )}
             </span>
             <span className="text-xs opacity-60">
-              {loadingLanguages ? "..." : supportedLanguages.length ? supportedLanguages.length : ""}
+              {loadingLanguages ? "" : supportedLanguages.length ? `${supportedLanguages.length}` : "0"}
             </span>
           </button>
 
@@ -740,29 +827,45 @@ const CaptionControls = ({
               </div>
 
               <div className="max-h-[280px] overflow-y-auto">
-                {supportedLanguages.map((l) => {
-                  const code = String(l?.language || "");
-                  const name = String(l?.name || code);
-                  return (
+                {loadingLanguages ? (
+                  <div className="p-8 flex flex-col items-center justify-center">
+                    <span className="loading loading-spinner loading-md mb-3"></span>
+                    <div className="text-sm text-base-content/60">Loading supported languages...</div>
+                  </div>
+                ) : supportedLanguages.length > 0 ? (
+                  supportedLanguages.map((l) => {
+                    const code = String(l?.language || l?.code || "");
+                    const name = String(l?.name || code);
+                    return (
+                      <button
+                        key={`lang-${code}`}
+                        type="button"
+                        className={`w-full text-left px-3 py-2 hover:bg-base-200 flex items-center justify-between transition-colors ${
+                          code === targetLanguage ? "bg-primary/10 border-l-4 border-primary" : ""
+                        }`}
+                        onClick={() => {
+                          setTargetLanguage(code || "en");
+                          setLanguagesOpen(false);
+                          toast.success(`Language set to: ${name}`);
+                        }}
+                      >
+                        <span className="text-sm truncate font-medium">{name}</span>
+                        <span className="text-xs text-base-content/60 bg-base-200 px-2 py-1 rounded">{code}</span>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="p-8 text-center">
+                    <div className="text-sm text-base-content/60 mb-3">No languages loaded</div>
                     <button
-                      key={`lang-${code}`}
                       type="button"
-                      className={`w-full text-left px-3 py-2 hover:bg-base-200 flex items-center justify-between ${
-                        code === targetLanguage ? "bg-base-200" : ""
-                      }`}
-                      onClick={() => {
-                        setTargetLanguage(code || "en");
-                        setLanguagesOpen(false);
-                      }}
+                      className="btn btn-sm btn-outline"
+                      onClick={() => fetchSupportedLanguages()}
                     >
-                      <span className="text-sm truncate">{name}</span>
-                      <span className="text-xs text-base-content/60">{code}</span>
+                      Retry
                     </button>
-                  );
-                })}
-                {!loadingLanguages && supportedLanguages.length === 0 ? (
-                  <div className="p-4 text-sm text-base-content/60">No languages loaded.</div>
-                ) : null}
+                  </div>
+                )}
               </div>
             </div>
           ) : null}
