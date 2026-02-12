@@ -1,5 +1,5 @@
 import speech from '@google-cloud/speech';
-import { v2 as translate } from '@google-cloud/translate';
+import { Translate } from '@google-cloud/translate';
 
 // Google Cloud language mapping
 const googleCloudLanguageMap = {
@@ -199,15 +199,15 @@ class GoogleCloudTranslation {
     const apiKey = process.env.GOOGLE_CLOUD_API_KEY;
     if (apiKey) {
       console.log('[GoogleCloudTranslation] Using API key authentication');
-      this.translateClient = new translate.v2.Translate({
-        apiKey,
+      this.translateClient = new Translate({
+        key: apiKey,
         projectId: process.env.GOOGLE_CLOUD_PROJECT_ID || 'aero-sonix'
       });
     } else {
       console.log('[GoogleCloudTranslation] Using service account authentication');
       // Try service account authentication
       try {
-        this.translateClient = new translate.v2.Translate({
+        this.translateClient = new Translate({
           projectId: process.env.GOOGLE_CLOUD_PROJECT_ID || 'aero-sonix'
         });
       } catch (error) {
@@ -226,17 +226,17 @@ class GoogleCloudTranslation {
       
       console.log('[GoogleCloudTranslation] Using Google target code:', googleTargetCode);
       
-      const [langs] = await this.translateClient.getLanguages(googleTargetCode);
+      const [languages] = await this.translateClient.getLanguages(googleTargetCode);
       
-      if (!Array.isArray(langs)) {
-        console.error('[GoogleCloudTranslation] Invalid response from Google Cloud:', langs);
+      if (!Array.isArray(languages)) {
+        console.error('[GoogleCloudTranslation] Invalid response from Google Cloud:', languages);
         throw new Error('Invalid response from Google Cloud Translation API');
       }
       
-      console.log('[GoogleCloudTranslation] Successfully retrieved', langs.length, 'languages');
+      console.log('[GoogleCloudTranslation] Successfully retrieved', languages.length, 'languages');
       
       // Transform the response to include both name and code
-      const transformedLanguages = langs.map(lang => ({
+      const transformedLanguages = languages.map(lang => ({
         code: lang.code || lang.language,
         name: lang.name || lang.displayName || lang.code,
         language: lang.code || lang.language
@@ -293,14 +293,14 @@ class GoogleCloudTranslation {
       console.log('[GoogleCloudTranslation] Translation result:', {
         original: text.substring(0, 100) + (text.length > 100 ? '...' : ''),
         translated: translation.substring(0, 100) + (translation.length > 100 ? '...' : ''),
-        detectedSourceLanguage: metadata.data.translations[0]?.detectedSourceLanguage
+        detectedSourceLanguage: metadata?.data?.translations?.[0]?.detectedSourceLanguage
       });
 
       return {
         translatedText: translation,
-        sourceLanguage: metadata.data.translations[0]?.detectedSourceLanguage || sourceLanguage,
+        sourceLanguage: metadata?.data?.translations?.[0]?.detectedSourceLanguage || sourceLanguage,
         targetLanguage: googleTargetCode,
-        confidence: metadata.data.translations[0]?.confidence || null
+        confidence: metadata?.data?.translations?.[0]?.confidence || null
       };
     } catch (error) {
       console.error('[GoogleCloudTranslation] Error translating text:', error);
@@ -319,8 +319,8 @@ class GoogleCloudTranslation {
       console.log('[GoogleCloudTranslation] Language detection result:', detection);
 
       return {
-        language: normalizeLanguageCode(detection[0]?.language) || 'en',
-        confidence: detection[0]?.confidence || 0
+        language: normalizeLanguageCode(detection?.language) || 'en',
+        confidence: detection?.confidence || 0
       };
     } catch (error) {
       console.error('[GoogleCloudTranslation] Error detecting language:', error);
