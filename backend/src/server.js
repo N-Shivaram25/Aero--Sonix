@@ -218,7 +218,21 @@ const setupGoogleCloudWsProxy = (server) => {
     
     // Get current user's profile language (this is the speaker)
     const speaker = clientWs.user;
-    const speakerLanguageRaw = speaker?.nativeLanguage || 'english';
+    let speakerLanguageRaw = speaker?.nativeLanguage || 'english';
+    
+    // If user doesn't have nativeLanguage in profile, try to fetch full profile
+    if (!speaker?.nativeLanguage && speaker?._id) {
+      try {
+        const fullUser = await User.findById(speaker._id).select('nativeLanguage fullName');
+        if (fullUser?.nativeLanguage) {
+          speakerLanguageRaw = fullUser.nativeLanguage;
+          console.log('[GoogleCloudProxy] Fetched nativeLanguage from profile:', speakerLanguageRaw);
+        }
+      } catch (profileError) {
+        console.error('[GoogleCloudProxy] Error fetching user profile:', profileError);
+      }
+    }
+    
     const speakerLanguageCode = normalizeLanguageCode(speakerLanguageRaw) || 'en';
     
     console.log("[GoogleCloudProxy] Speaker profile language:", speakerLanguageRaw, "->", speakerLanguageCode);
@@ -264,6 +278,7 @@ const setupGoogleCloudWsProxy = (server) => {
     // Notify existing participants about new user
     for (const [, peer] of room.entries()) {
       try {
+        // Send peer info to new client
         clientWs.send(
           JSON.stringify({
             type: "peer",
@@ -272,14 +287,8 @@ const setupGoogleCloudWsProxy = (server) => {
             nativeLanguage: peer.nativeLanguage,
           })
         );
-      } catch (error) {
-        console.error("[GoogleCloudProxy] Error sending peer info to new client:", error);
-      }
-    }
 
-    // Notify existing participants about new user
-    for (const [, peer] of room.entries()) {
-      try {
+        // Send new user info to existing peer
         peer.ws.send(
           JSON.stringify({
             type: "peer",
@@ -288,8 +297,14 @@ const setupGoogleCloudWsProxy = (server) => {
             nativeLanguage: speakerLanguageRaw,
           })
         );
+        
+        console.log('[GoogleCloudProxy] Notified peer about new user:', {
+          from: myUserName,
+          to: peer.fullName,
+          language: speakerLanguageRaw
+        });
       } catch (error) {
-        console.error("[GoogleCloudProxy] Error notifying peer about new user:", error);
+        console.error("[GoogleCloudProxy] Error in peer notification:", error);
       }
     }
 

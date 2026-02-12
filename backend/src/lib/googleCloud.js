@@ -1,7 +1,8 @@
-import speech from '@google-cloud/speech';
+import speechPkg from '@google-cloud/speech';
 import pkg from '@google-cloud/translate';
 const { v2 } = pkg;
 const { Translate } = v2;
+const { SpeechClient } = speechPkg;
 
 // Google Cloud language mapping
 const googleCloudLanguageMap = {
@@ -106,7 +107,27 @@ const normalizeLanguageCode = (value) => {
 
 class GoogleCloudSTT {
   constructor() {
-    this.speechClient = new speech.SpeechClient();
+    console.log('[GoogleCloudSTT] Initializing speech service...');
+    
+    // Use service account credentials from environment variable
+    const serviceAccountKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+    
+    if (serviceAccountKey) {
+      console.log('[GoogleCloudSTT] Using service account credentials from environment');
+      try {
+        const credentials = JSON.parse(serviceAccountKey);
+        this.speechClient = new SpeechClient({
+          credentials: credentials,
+        });
+      } catch (parseError) {
+        console.error('[GoogleCloudSTT] Failed to parse service account key:', parseError);
+        throw new Error('Invalid GOOGLE_SERVICE_ACCOUNT_KEY format. Must be valid JSON.');
+      }
+    } else {
+      console.log('[GoogleCloudSTT] No service account key found, trying default credentials');
+      // Fallback to default credentials (for local development)
+      this.speechClient = new SpeechClient();
+    }
   }
 
   getSpeechConfig(languageCode) {
