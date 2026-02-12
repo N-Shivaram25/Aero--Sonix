@@ -55,6 +55,9 @@ const CallPage = () => {
           id: authUser._id,
           name: authUser.fullName,
           image: authUser.profilePic,
+          custom: {
+            nativeLanguage: authUser?.nativeLanguage || null,
+          },
         };
 
         localClient = new StreamVideoClient({
@@ -138,6 +141,9 @@ const CallContent = ({ callId }) => {
   const { useCallCallingState } = useCallStateHooks();
   const callingState = useCallCallingState();
 
+  const { useParticipants } = useCallStateHooks();
+  const participants = useParticipants();
+
   const navigate = useNavigate();
   const { authUser } = useAuthUser();
 
@@ -150,6 +156,53 @@ const CallContent = ({ callId }) => {
   const [captionMeta, setCaptionMeta] = useState({});
   const [peerMeta, setPeerMeta] = useState(null);
   const [spokenLanguage, setSpokenLanguage] = useState("english");
+
+  useEffect(() => {
+    const list = Array.isArray(participants) ? participants : [];
+    const myId = String(authUser?._id || "");
+
+    if (list.length < 2) {
+      console.warn("[Captions] No opponent participant yet. participants:", list.length);
+      return;
+    }
+
+    const opponent = list.find((p) => String(p?.user?.id || p?.userId || "") !== myId);
+    if (!opponent) {
+      console.warn("[Captions] Could not resolve opponent from participants");
+      return;
+    }
+
+    const opponentId = String(opponent?.user?.id || opponent?.userId || "");
+    const opponentName = String(opponent?.user?.name || opponent?.name || "").trim() || "Opponent";
+    const opponentNativeLanguage =
+      String(opponent?.user?.custom?.nativeLanguage || opponent?.user?.nativeLanguage || "").trim() || null;
+
+    if (!opponentNativeLanguage) {
+      console.warn("[Captions] Opponent nativeLanguage missing from Stream user custom data", {
+        opponentId,
+        opponentName,
+      });
+    }
+
+    setPeerMeta((prev) => {
+      const next = {
+        userId: opponentId,
+        fullName: opponentName,
+        nativeLanguage: opponentNativeLanguage || prev?.nativeLanguage || null,
+      };
+
+      if (
+        prev?.userId === next.userId &&
+        prev?.fullName === next.fullName &&
+        prev?.nativeLanguage === next.nativeLanguage
+      ) {
+        return prev;
+      }
+
+      console.log("[Captions] Resolved opponent from participants:", next);
+      return next;
+    });
+  }, [authUser?._id, participants]);
 
   useEffect(() => {
     const nextSpoken = String(authUser?.nativeLanguage || "english").toLowerCase();
