@@ -185,7 +185,7 @@ const CallContent = ({ callId }) => {
         <div className="flex-1 min-h-0">
           <SpeakerLayout />
         </div>
-        {captionsEnabled ? <CaptionBar captions={captions} meta={captionMeta} /> : null}
+        {captionsEnabled ? <CaptionBar captions={captions} meta={captionMeta} peerMeta={peerMeta} /> : null}
         <CallControls />
       </div>
     </StreamTheme>
@@ -536,6 +536,9 @@ const CaptionControls = ({
             }
 
             if (data?.type !== "transcript") return;
+
+            // Filter out current user's own speech - only show opponent's speech
+            if (data?.speaker_user_id === authUser?._id) return;
 
             const originalText = String(data?.original_text || "").trim();
             if (!originalText) return;
@@ -892,6 +895,7 @@ const CaptionControls = ({
 const CaptionBar = ({
   captions,
   meta,
+  peerMeta,
 }) => {
   const list = Array.isArray(captions) ? captions : [];
 

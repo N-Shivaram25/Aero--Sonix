@@ -135,13 +135,10 @@ class GoogleCloudSTT {
     const googleCode = googleCloudLanguageMap[normalizedCode] || 'en-US';
     
     return {
-      encoding: 'LINEAR16',
+      encoding: "LINEAR16",
       sampleRateHertz: 16000,
       languageCode: googleCode,
       enableAutomaticPunctuation: true,
-      enableWordTimeOffsets: true,
-      model: 'latest_short',
-      maxAlternatives: 1
     };
   }
 
@@ -152,11 +149,6 @@ class GoogleCloudSTT {
       const request = {
         config: config,
         interimResults: true,
-        enableVoiceActivityEvents: true,
-        voiceActivityTimeout: {
-          speechStartTimeout: 2000,
-          speechEndTimeout: 2000
-        }
       };
 
       console.log('[GoogleCloudSTT] Starting streaming recognition with config:', JSON.stringify(config, null, 2));

@@ -338,7 +338,6 @@ const setupGoogleCloudWsProxy = (server) => {
     const sttService = new GoogleCloudSTT();
     const translationService = new GoogleCloudTranslation();
     
-    let audioBuffer = Buffer.alloc(0);
     let recognizeStream = null;
     let closed = false;
     
@@ -482,18 +481,10 @@ const setupGoogleCloudWsProxy = (server) => {
       if (closed) return;
       
       try {
-        // Handle binary audio data
+        // Handle binary audio data - write directly to stream
         if (chunk instanceof Buffer) {
-          audioBuffer = Buffer.concat([audioBuffer, chunk]);
-          
-          // Process audio in chunks (send every 100ms of audio)
-          if (audioBuffer.length >= 3200) { // 16000 samples/sec * 2 bytes/sample * 0.1 sec
-            if (recognizeStream && recognizeStream.writable && !recognizeStream.destroyed) {
-              recognizeStream.write({
-                audio: audioBuffer
-              });
-            }
-            audioBuffer = Buffer.alloc(0);
+          if (recognizeStream && !recognizeStream.destroyed) {
+            recognizeStream.write(chunk);
           }
         }
       } catch (error) {
