@@ -141,11 +141,15 @@ const CallContent = ({ callId }) => {
   const navigate = useNavigate();
   const { authUser } = useAuthUser();
 
-  const [captionsEnabled, setCaptionsEnabled] = useState(false);
-  const [spokenLanguage, setSpokenLanguage] = useState("english");
-  const [targetLanguage, setTargetLanguage] = useState("en");
   const [captions, setCaptions] = useState([]);
-  const [captionMeta, setCaptionMeta] = useState(null);
+  const [captionsEnabled, setCaptionsEnabled] = useState(false);
+  const [targetLanguage, setTargetLanguage] = useState("en");
+  const [supportedLanguages, setSupportedLanguages] = useState([]);
+  const [loadingLanguages, setLoadingLanguages] = useState(false);
+  const [languagesOpen, setLanguagesOpen] = useState(false);
+  const [captionMeta, setCaptionMeta] = useState({});
+  const [peerMeta, setPeerMeta] = useState(null);
+  const [spokenLanguage, setSpokenLanguage] = useState("english");
 
   useEffect(() => {
     const nextSpoken = String(authUser?.nativeLanguage || "english").toLowerCase();
@@ -180,6 +184,7 @@ const CallContent = ({ callId }) => {
         setTargetLanguage={setTargetLanguage}
         pushCaption={pushCaption}
         setCaptionMeta={setCaptionMeta}
+        setPeerMeta={setPeerMeta}
       />
       <div className="w-full h-[100dvh] flex flex-col">
         <div className="flex-1 min-h-0">
@@ -203,6 +208,7 @@ const CaptionControls = ({
   setTargetLanguage,
   pushCaption,
   setCaptionMeta,
+  setPeerMeta,
 }) => {
   const { useParticipants } = useCallStateHooks();
   const participants = useParticipants();
@@ -218,7 +224,6 @@ const CaptionControls = ({
   const [supportedLanguages, setSupportedLanguages] = useState([]);
   const [languagesOpen, setLanguagesOpen] = useState(false);
   const [loadingLanguages, setLoadingLanguages] = useState(false);
-  const [peerMeta, setPeerMeta] = useState(null);
 
   const fetchSupportedLanguages = useCallback(async () => {
     setLoadingLanguages(true);
@@ -438,6 +443,13 @@ const CaptionControls = ({
             console.log("[Captions] Google Cloud WS open");
             reconnectAttempts = 0; // Reset on successful connection
             toast.success("Live captions connected");
+            
+            // Request current room participants for instant opponent language
+            try {
+              newWs.send(JSON.stringify({ type: "request_peers" }));
+            } catch (error) {
+              console.error("[Captions] Error requesting peers:", error);
+            }
           };
 
           newWs.onclose = (e) => {

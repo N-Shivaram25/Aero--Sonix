@@ -487,8 +487,37 @@ const setupGoogleCloudWsProxy = (server) => {
             recognizeStream.write(chunk);
           }
         }
+        
+        // Handle text messages (like request_peers)
+        if (typeof chunk === 'string') {
+          try {
+            const message = JSON.parse(chunk);
+            if (message.type === 'request_peers') {
+              // Send current room participants to the requesting client
+              const currentRoom = getRoom(callId);
+              if (currentRoom) {
+                for (const [, peer] of currentRoom.entries()) {
+                  if (peer.userId !== myUserId) {
+                    try {
+                      clientWs.send(JSON.stringify({
+                        type: "peer",
+                        userId: peer.userId,
+                        fullName: peer.fullName,
+                        nativeLanguage: peer.nativeLanguage,
+                      }));
+                    } catch (error) {
+                      console.error('[GoogleCloudProxy] Error sending peer info:', error);
+                    }
+                  }
+                }
+              }
+            }
+          } catch (parseError) {
+            // Ignore JSON parse errors for binary data
+          }
+        }
       } catch (error) {
-        console.error('[GoogleCloudProxy] Error processing audio chunk:', error);
+        console.error('[GoogleCloudProxy] Error processing message:', error);
       }
     });
 
