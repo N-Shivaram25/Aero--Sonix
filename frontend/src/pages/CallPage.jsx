@@ -348,6 +348,7 @@ const CaptionControls = ({
   const micStreamRef = useRef(null);
   const trackRef = useRef(null);
   const trackHandlersRef = useRef(null);
+  const micMuteStateRef = useRef({ muted: null, lastRestartAtMs: 0 });
   const interimRef = useRef("");
   const silenceTimerRef = useRef(null);
 
@@ -436,6 +437,48 @@ const CaptionControls = ({
       flushInterimAsLine();
     }, 3000);
   };
+
+  useEffect(() => {
+    if (!captionsEnabled) {
+      micMuteStateRef.current = { muted: null, lastRestartAtMs: 0 };
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      const callObj = callRef.current;
+      const mic = callObj?.microphone;
+      const state = mic?.state;
+
+      let muted = null;
+      if (typeof state?.muted === "boolean") muted = state.muted;
+      else if (typeof state?.enabled === "boolean") muted = !state.enabled;
+      else if (typeof mic?.enabled === "boolean") muted = !mic.enabled;
+      else if (typeof trackRef.current?.muted === "boolean") muted = trackRef.current.muted;
+
+      if (muted === null) return;
+
+      const prevMuted = micMuteStateRef.current.muted;
+      if (prevMuted === null) {
+        micMuteStateRef.current.muted = muted;
+        return;
+      }
+
+      // If mic transitions from muted -> unmuted, restart captions pipeline.
+      if (prevMuted === true && muted === false) {
+        const now = Date.now();
+        if (now - micMuteStateRef.current.lastRestartAtMs >= 1500) {
+          micMuteStateRef.current.lastRestartAtMs = now;
+          setRestartSeq((v) => v + 1);
+        }
+      }
+
+      micMuteStateRef.current.muted = muted;
+    }, 500);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [captionsEnabled]);
 
   useEffect(() => {
     if (!captionsEnabled) return;
