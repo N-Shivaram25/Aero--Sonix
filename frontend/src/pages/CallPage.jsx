@@ -617,14 +617,15 @@ const CaptionControls = ({
 
             if (data?.type !== "transcript") return;
 
-            // Filter out current user's own speech - only show opponent's speech
-            if (data?.speaker_user_id === authUser?._id) return;
+            const isLocalSpeaker = String(data?.speaker_user_id || "") === String(authUser?._id || "");
 
             const originalText = String(data?.original_text || "").trim();
             if (!originalText) return;
 
             const isFinal = data?.is_final === true;
-            const speakerName = String(data?.speaker_full_name || data?.speaker || "Speaker");
+            const speakerName = isLocalSpeaker
+              ? "You"
+              : String(data?.speaker_full_name || data?.speaker || "Speaker");
             const speakerUserId = String(data?.speaker_user_id || "").trim() || speakerName;
 
             // Interim captions: overwrite the same line per speaker for instant updates
