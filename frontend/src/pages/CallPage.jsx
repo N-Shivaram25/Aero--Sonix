@@ -10,7 +10,7 @@ import {
   StreamVideoClient,
   StreamCall,
   CallControls,
-  SpeakerLayout,
+  PaginatedGridLayout,
   StreamTheme,
   CallingState,
   useCallStateHooks,
@@ -288,12 +288,24 @@ const CallContent = ({ callId }) => {
         setCaptionMeta={setCaptionMeta}
         setPeerMeta={setPeerMeta}
       />
-      <div className="w-full h-[100dvh] flex flex-col">
-        <div className="flex-1 min-h-0">
-          <SpeakerLayout />
+      <div className="w-full h-[100dvh] flex flex-col bg-[#0b0f1a] text-base-content">
+        <div className="flex-1 min-h-0 p-4">
+          <div className="h-full w-full overflow-hidden rounded-2xl border border-white/10 bg-black/30 shadow-[0_10px_30px_rgba(0,0,0,0.35)]">
+            <PaginatedGridLayout />
+          </div>
         </div>
-        {showCaptions ? <CaptionBar captions={captions} meta={captionMeta} peerMeta={peerMeta} /> : null}
-        <CallControls />
+
+        {showCaptions ? (
+          <div className="shrink-0">
+            <CaptionBar captions={captions} meta={captionMeta} peerMeta={peerMeta} />
+          </div>
+        ) : null}
+
+        <div className="shrink-0 px-4 pb-4">
+          <div className="mx-auto w-full max-w-[820px] rounded-2xl border border-white/10 bg-black/40 backdrop-blur-md p-3">
+            <CallControls />
+          </div>
+        </div>
       </div>
     </StreamTheme>
   );
