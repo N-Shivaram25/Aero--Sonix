@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
-import { getStreamToken, getUserVoiceProfile } from "../lib/api";
+import { callTts, getStreamToken, getUserVoiceProfile } from "../lib/api";
 import { ArrowLeftIcon } from "lucide-react";
 
 import {
@@ -150,6 +150,7 @@ const CallContent = ({ callId }) => {
   const [captions, setCaptions] = useState([]);
   const [captionsEnabled, setCaptionsEnabled] = useState(true);
   const [showCaptions, setShowCaptions] = useState(false);
+  const [interpretationMode, setInterpretationMode] = useState(false);
   const [captionMeta, setCaptionMeta] = useState({});
   const [peerMeta, setPeerMeta] = useState(null);
   const [spokenLanguage, setSpokenLanguage] = useState("english");
@@ -282,6 +283,8 @@ const CallContent = ({ callId }) => {
         setCaptionsEnabled={setCaptionsEnabled}
         showCaptions={showCaptions}
         setShowCaptions={setShowCaptions}
+        interpretationMode={interpretationMode}
+        setInterpretationMode={setInterpretationMode}
         spokenLanguage={spokenLanguage}
         setSpokenLanguage={setSpokenLanguage}
         pushCaption={pushCaption}
@@ -319,6 +322,8 @@ const CaptionControls = ({
   setCaptionsEnabled,
   showCaptions,
   setShowCaptions,
+  interpretationMode,
+  setInterpretationMode,
   spokenLanguage,
   setSpokenLanguage,
   pushCaption,
@@ -351,6 +356,92 @@ const CaptionControls = ({
   const micMuteStateRef = useRef({ muted: null, lastRestartAtMs: 0 });
   const interimRef = useRef("");
   const silenceTimerRef = useRef(null);
+
+  const ttsQueueRef = useRef([]);
+  const ttsPlayingRef = useRef(false);
+  const ttsAudioRef = useRef(null);
+  const lastTtsTextRef = useRef("");
+
+  const stopTts = useCallback(() => {
+    try {
+      const a = ttsAudioRef.current;
+      if (a) {
+        a.onended = null;
+        a.onerror = null;
+        try {
+          a.pause();
+        } catch {
+        }
+      }
+    } catch {
+    }
+    ttsAudioRef.current = null;
+    ttsQueueRef.current = [];
+    ttsPlayingRef.current = false;
+    lastTtsTextRef.current = "";
+  }, []);
+
+  const playNextTts = useCallback(() => {
+    if (!interpretationMode) {
+      stopTts();
+      return;
+    }
+    const next = ttsQueueRef.current.shift();
+    if (!next) {
+      ttsPlayingRef.current = false;
+      return;
+    }
+
+    ttsPlayingRef.current = true;
+    const audio = new Audio(next.url);
+    ttsAudioRef.current = audio;
+
+    audio.onended = () => {
+      try {
+        URL.revokeObjectURL(next.url);
+      } catch {
+      }
+      playNextTts();
+    };
+    audio.onerror = () => {
+      try {
+        URL.revokeObjectURL(next.url);
+      } catch {
+      }
+      playNextTts();
+    };
+
+    try {
+      audio.play();
+    } catch {
+      playNextTts();
+    }
+  }, [interpretationMode, stopTts]);
+
+  const enqueueTts = useCallback(async (text) => {
+    if (!interpretationMode) return;
+    const clean = String(text || "").trim();
+    if (!clean) return;
+
+    // Prevent repeating the same phrase too often (common with interim updates).
+    if (lastTtsTextRef.current === clean) return;
+    lastTtsTextRef.current = clean;
+
+    try {
+      const speakerUserId = String(authUserIdRef.current || "");
+      const resp = await callTts({ text: clean, speakerUserId });
+      const buf = resp?.data;
+      if (!buf) return;
+      const blob = new Blob([buf], { type: "audio/mpeg" });
+      const url = URL.createObjectURL(blob);
+      ttsQueueRef.current.push({ url });
+      if (!ttsPlayingRef.current) {
+        playNextTts();
+      }
+    } catch {
+      // ignore
+    }
+  }, [interpretationMode, playNextTts]);
 
   const toDeepgramLanguage = (languageKey) => {
     const key = String(languageKey || "").trim().toLowerCase();
@@ -437,6 +528,12 @@ const CaptionControls = ({
       flushInterimAsLine();
     }, 3000);
   };
+
+  useEffect(() => {
+    if (!interpretationMode) {
+      stopTts();
+    }
+  }, [interpretationMode, stopTts]);
 
   useEffect(() => {
     if (!captionsEnabled) {
@@ -780,6 +877,11 @@ const CaptionControls = ({
               };
               pushCaption(translatedCaption);
             }
+
+            // TTS only for final translated segments from remote speakers.
+            if (!isLocalSpeaker && interpretationMode && isFinal && data?.translated_text) {
+              enqueueTts(String(data.translated_text || ""));
+            }
           };
         };
 
@@ -999,6 +1101,15 @@ const CaptionControls = ({
         </span>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className={`btn btn-xs ${interpretationMode ? "btn-primary" : "btn-outline"}`}
+            onClick={() => setInterpretationMode((v) => !v)}
+            title={interpretationMode ? "Disable voice interpretation" : "Enable voice interpretation"}
+          >
+            {interpretationMode ? "TTS On" : "TTS Off"}
+          </button>
+
           <button
             type="button"
             className={`btn btn-xs ${showCaptions ? "btn-primary" : "btn-outline"}`}
