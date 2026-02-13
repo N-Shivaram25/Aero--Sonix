@@ -361,6 +361,8 @@ const CaptionControls = ({
   const ttsPlayingRef = useRef(false);
   const ttsAudioRef = useRef(null);
   const lastTtsTextRef = useRef("");
+  const interpretationModeRef = useRef(false);
+  const enqueueTtsRef = useRef(null);
 
   const stopTts = useCallback(() => {
     try {
@@ -382,7 +384,7 @@ const CaptionControls = ({
   }, []);
 
   const playNextTts = useCallback(() => {
-    if (!interpretationMode) {
+    if (!interpretationModeRef.current) {
       stopTts();
       return;
     }
@@ -412,14 +414,19 @@ const CaptionControls = ({
     };
 
     try {
-      audio.play();
+      const p = audio.play();
+      if (p && typeof p.then === "function") {
+        p.catch(() => {
+          playNextTts();
+        });
+      }
     } catch {
       playNextTts();
     }
-  }, [interpretationMode, stopTts]);
+  }, [stopTts]);
 
   const enqueueTts = useCallback(async (text) => {
-    if (!interpretationMode) return;
+    if (!interpretationModeRef.current) return;
     const clean = String(text || "").trim();
     if (!clean) return;
 
@@ -441,7 +448,15 @@ const CaptionControls = ({
     } catch {
       // ignore
     }
-  }, [interpretationMode, playNextTts]);
+  }, [playNextTts]);
+
+  useEffect(() => {
+    interpretationModeRef.current = Boolean(interpretationMode);
+  }, [interpretationMode]);
+
+  useEffect(() => {
+    enqueueTtsRef.current = enqueueTts;
+  }, [enqueueTts]);
 
   const toDeepgramLanguage = (languageKey) => {
     const key = String(languageKey || "").trim().toLowerCase();
@@ -532,8 +547,53 @@ const CaptionControls = ({
   useEffect(() => {
     if (!interpretationMode) {
       stopTts();
+      return;
+    }
+
+    // Attempt to unlock audio playback (helps with autoplay policies)
+    try {
+      const a = new Audio();
+      a.muted = true;
+      const p = a.play();
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    } catch {
     }
   }, [interpretationMode, stopTts]);
+
+  useEffect(() => {
+    const list = Array.isArray(participants) ? participants : [];
+    for (const p of list) {
+      if (p?.isLocalParticipant) continue;
+
+      try {
+        const maybeStream = p?.audioStream || p?.audio?.stream || p?.audio?.mediaStream;
+        if (maybeStream && typeof maybeStream.getAudioTracks === "function") {
+          for (const t of maybeStream.getAudioTracks() || []) {
+            try {
+              t.enabled = !interpretationMode;
+            } catch {
+            }
+          }
+        }
+      } catch {
+      }
+
+      try {
+        const maybeTrack =
+          p?.audioTrack ||
+          p?.audio?.track ||
+          p?.tracks?.audio ||
+          p?.publishedTracks?.audio;
+        if (maybeTrack && typeof maybeTrack === "object" && "enabled" in maybeTrack) {
+          try {
+            maybeTrack.enabled = !interpretationMode;
+          } catch {
+          }
+        }
+      } catch {
+      }
+    }
+  }, [interpretationMode, participants]);
 
   useEffect(() => {
     if (!captionsEnabled) {
@@ -879,8 +939,11 @@ const CaptionControls = ({
             }
 
             // TTS only for final translated segments from remote speakers.
-            if (!isLocalSpeaker && interpretationMode && isFinal && data?.translated_text) {
-              enqueueTts(String(data.translated_text || ""));
+            if (!isLocalSpeaker && isFinal && data?.translated_text && interpretationModeRef.current) {
+              try {
+                enqueueTtsRef.current?.(String(data.translated_text || ""));
+              } catch {
+              }
             }
           };
         };
