@@ -154,15 +154,21 @@ const CallContent = ({ callId }) => {
   const [peerMeta, setPeerMeta] = useState(null);
   const [spokenLanguage, setSpokenLanguage] = useState("english");
   const peerProfileFetchRef = useRef({ userId: null, inFlight: false });
+  const warnedNoOpponentRef = useRef(false);
 
   useEffect(() => {
     const list = Array.isArray(participants) ? participants : [];
     const myId = String(authUser?._id || "");
 
     if (list.length < 2) {
-      console.warn("[Captions] No opponent participant yet. participants:", list.length);
+      if (!warnedNoOpponentRef.current) {
+        warnedNoOpponentRef.current = true;
+        console.warn("[Captions] No opponent participant yet. participants:", list.length);
+      }
       return;
     }
+
+    warnedNoOpponentRef.current = false;
 
     const opponent = list.find((p) => String(p?.user?.id || p?.userId || "") !== myId);
     if (!opponent) {
@@ -311,6 +317,17 @@ const CaptionControls = ({
   const participants = useParticipants();
   const call = useCall();
 
+  const callRef = useRef(null);
+  const authUserIdRef = useRef("");
+
+  useEffect(() => {
+    callRef.current = call;
+  }, [call]);
+
+  useEffect(() => {
+    authUserIdRef.current = String(authUser?._id || "");
+  }, [authUser?._id]);
+
   const socketRef = useRef(null);
   const audioCtxRef = useRef(null);
   const processorRef = useRef(null);
@@ -438,8 +455,9 @@ const CaptionControls = ({
 
     const start = async () => {
       try {
+        const callObj = callRef.current;
         try {
-          await call?.microphone?.enable?.();
+          await callObj?.microphone?.enable?.();
           // Add a small delay to ensure microphone is properly initialized
           await new Promise(resolve => setTimeout(resolve, 500));
         } catch {
@@ -451,7 +469,7 @@ const CaptionControls = ({
         let maybeMediaStreamTrack = null;
         
         // Method 1: Try microphone state
-        const microphoneState = call?.microphone?.state;
+        const microphoneState = callObj?.microphone?.state;
         console.log("[Captions] Microphone state:", microphoneState);
         
         if (microphoneState?.mediaStream) {
@@ -466,7 +484,7 @@ const CaptionControls = ({
         
         // Method 2: Try accessing through call participants
         if (!maybeMediaStreamTrack) {
-          const localParticipant = call?.state?.localParticipant;
+          const localParticipant = callObj?.state?.localParticipant;
           console.log("[Captions] Local participant:", localParticipant);
           
           if (localParticipant?.microphone?.track) {
@@ -617,7 +635,7 @@ const CaptionControls = ({
 
             if (data?.type !== "transcript") return;
 
-            const isLocalSpeaker = String(data?.speaker_user_id || "") === String(authUser?._id || "");
+            const isLocalSpeaker = String(data?.speaker_user_id || "") === String(authUserIdRef.current || "");
 
             const originalText = String(data?.original_text || "").trim();
             if (!originalText) return;
@@ -818,7 +836,7 @@ const CaptionControls = ({
 
       try {
         // Check if we're using Stream's microphone or a fallback
-        const microphoneState = call?.microphone?.state;
+        const microphoneState = callRef.current?.microphone?.state;
         let hasStreamTrack = false;
         
         if (microphoneState?.mediaStream) {
@@ -826,7 +844,7 @@ const CaptionControls = ({
         } else if (microphoneState?.track) {
           hasStreamTrack = microphoneState.track.readyState !== "ended";
         } else {
-          const localParticipant = call?.state?.localParticipant;
+          const localParticipant = callRef.current?.state?.localParticipant;
           hasStreamTrack = localParticipant?.microphone?.track?.readyState !== "ended";
         }
         
@@ -838,7 +856,7 @@ const CaptionControls = ({
 
       interimRef.current = "";
     };
-  }, [authUser?.fullName, call, captionsEnabled, pushCaption, setCaptionsEnabled]);
+  }, [callId, captionsEnabled, pushCaption, setCaptionsEnabled]);
 
   return (
     <div className="absolute top-4 right-4 z-20 flex flex-col gap-3 bg-base-100/95 backdrop-blur-md rounded-2xl border-2 border-primary/20 shadow-xl p-4 min-w-[320px]">
@@ -955,8 +973,8 @@ const CaptionBar = ({
   // Get opponent's language for display
   const opponentLang = peerMeta?.nativeLanguage || "Unknown";
   const targetLang =
-    latestCaption?.target_language_raw ||
     meta?.target_language_raw ||
+    latestCaption?.target_language_raw ||
     "Unknown";
 
   return (
