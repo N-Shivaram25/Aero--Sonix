@@ -172,7 +172,8 @@ const CallContent = ({ callId }) => {
 
     const opponentId = String(opponent?.user?.id || opponent?.userId || "");
     const opponentName = String(opponent?.user?.name || opponent?.name || "").trim() || "Opponent";
-    const opponentNativeLanguage = String(opponent?.user?.nativeLanguage || "").trim() || null;
+    const opponentNativeLanguage =
+      String(opponent?.user?.custom?.nativeLanguage || opponent?.user?.nativeLanguage || "").trim() || null;
 
     setPeerMeta((prev) => {
       const next = {
@@ -180,6 +181,15 @@ const CallContent = ({ callId }) => {
         fullName: opponentName,
         nativeLanguage: opponentNativeLanguage,
       };
+
+      // IMPORTANT: Stream participant objects often do not contain nativeLanguage.
+      // If we already learned it from WebSocket/backend, don't overwrite it with null/"".
+      if (prev?.userId === next.userId && prev?.nativeLanguage && !next.nativeLanguage) {
+        if (prev.fullName !== next.fullName) {
+          return { ...prev, fullName: next.fullName };
+        }
+        return prev;
+      }
 
       if (
         prev?.userId === next.userId &&
