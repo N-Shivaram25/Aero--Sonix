@@ -663,15 +663,15 @@ const CaptionControls = ({
             };
             pushCaption(originalCaption);
 
-            // Only show translation when segment is final (backend only translates on final)
-            if (isFinal && data?.translated_text) {
+            if (data?.translated_text) {
               const translatedCaption = {
                 id: `${Date.now()}-t`,
+                replaceId: `${speakerUserId}-translation`,
                 speaker: speakerName,
                 text: String(data.translated_text || ""),
                 timestamp: new Date().toISOString(),
                 type: "translation",
-                isFinal: true,
+                isFinal,
                 language: data?.target_language_raw || "Unknown",
                 speaker_profile_language: data?.speaker_profile_language,
                 speaker_profile_language_raw: data?.speaker_profile_language_raw,

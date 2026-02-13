@@ -343,6 +343,7 @@ const setupGoogleCloudWsProxy = (server) => {
     
     let recognizeStream = null;
     let closed = false;
+    const interimTranslationState = new Map();
     
     const cleanup = (reason) => {
       if (closed) return;
@@ -410,8 +411,18 @@ const setupGoogleCloudWsProxy = (server) => {
                     const peerTargetCode = normalizeLanguageCode(peer.nativeLanguage) || 'en';
                     let translatedText = null;
 
-                    // Only translate for FINAL segments (avoid expensive translation on interim).
-                    if (isFinal && peerTargetCode !== speakerLanguageCode) {
+                    const shouldTranslate = peerTargetCode !== speakerLanguageCode;
+                    const gateKey = `${myUserId}__${peer.userId}`;
+                    const nowMs = Date.now();
+                    const prevState = interimTranslationState.get(gateKey);
+                    const canTranslateInterim =
+                      !isFinal &&
+                      shouldTranslate &&
+                      originalText.trim().length >= 6 &&
+                      (!prevState || nowMs - prevState.lastAtMs >= 2500 || prevState.lastText !== originalText);
+
+                    // Translate on final always; translate interim only with throttling.
+                    if ((isFinal && shouldTranslate) || canTranslateInterim) {
                       try {
                         const translation = await translationService.translateText(
                           originalText,
@@ -419,6 +430,9 @@ const setupGoogleCloudWsProxy = (server) => {
                           speakerLanguageCode
                         );
                         translatedText = translation.translatedText;
+                        if (!isFinal) {
+                          interimTranslationState.set(gateKey, { lastAtMs: nowMs, lastText: originalText });
+                        }
                       } catch (translationError) {
                         console.error('[GoogleCloudProxy] Translation error:', translationError);
                       }
