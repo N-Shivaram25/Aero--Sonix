@@ -8,6 +8,8 @@ import {
   acceptFriendRequest,
   sendFriendRequest,
   cancelFriendRequest,
+  getSupportedTranslationLanguages,
+  updateProfile,
 } from "../lib/api";
 import { Link } from "react-router";
 import { CheckCircleIcon, UserPlusIcon, UsersIcon, XIcon } from "lucide-react";
@@ -17,13 +19,17 @@ import { capitialize } from "../lib/utils";
 import FriendCard, { getCountryFlag, getLanguageFlag } from "../components/FriendCard";
 import NoFriendsFound from "../components/NoFriendsFound";
 import { useStreamChat } from "../context/StreamChatContext";
+import useAuthUser from "../hooks/useAuthUser";
+import toast from "react-hot-toast";
 
 const HomePage = () => {
   const queryClient = useQueryClient();
   const { ensureUsersPresence, onlineMap } = useStreamChat();
+  const { authUser } = useAuthUser();
   const [outgoingRequestsIds, setOutgoingRequestsIds] = useState(new Set());
   const [messageCounts, setMessageCounts] = useState({});
   const [recentlyAdded, setRecentlyAdded] = useState([]);
+  const [languagesOpen, setLanguagesOpen] = useState(false);
 
   const { data: friends = [], isLoading: loadingFriends } = useQuery({
     queryKey: ["friends"],
@@ -43,6 +49,27 @@ const HomePage = () => {
   const { data: outgoingFriendReqs } = useQuery({
     queryKey: ["outgoingFriendReqs"],
     queryFn: getOutgoingFriendReqs,
+  });
+
+  const { data: supportedLanguagesRes, isLoading: loadingSupportedLanguages } = useQuery({
+    queryKey: ["supportedTranslationLanguages", "en"],
+    queryFn: () => getSupportedTranslationLanguages({ target: "en" }),
+  });
+
+  const supportedLanguages = Array.isArray(supportedLanguagesRes?.languages)
+    ? supportedLanguagesRes.languages
+    : [];
+
+  const { mutate: saveLanguageMutation, isPending: savingLanguage } = useMutation({
+    mutationFn: (nativeLanguage) => updateProfile({ nativeLanguage }),
+    onSuccess: () => {
+      toast.success("Language updated");
+      queryClient.invalidateQueries({ queryKey: ["authUser"] });
+      setLanguagesOpen(false);
+    },
+    onError: (error) => {
+      toast.error(error?.response?.data?.message || error?.message || "Failed to update language");
+    },
   });
 
   const { mutate: sendRequestMutation, isPending } = useMutation({
@@ -146,6 +173,69 @@ const HomePage = () => {
           <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Your Friends</h2>
 
           <div className="flex items-center gap-3">
+            <div className="dropdown dropdown-end">
+              <div
+                tabIndex={0}
+                role="button"
+                className="btn btn-outline btn-sm"
+                onClick={() => setLanguagesOpen((v) => !v)}
+              >
+                Supported Languages
+                {supportedLanguages.length ? (
+                  <span className="badge badge-primary badge-sm ml-2">{supportedLanguages.length}</span>
+                ) : null}
+              </div>
+              {languagesOpen ? (
+                <ul
+                  tabIndex={0}
+                  className="dropdown-content menu bg-base-100 rounded-box z-[1] w-80 p-2 shadow max-h-80 overflow-y-auto"
+                >
+                  <li className="px-2 py-1 opacity-70 text-xs">
+                    Your language: {String(authUser?.nativeLanguage || "").trim() || "Not set"}
+                  </li>
+                  {loadingSupportedLanguages ? (
+                    <li className="px-2 py-2">
+                      <span className="inline-flex items-center gap-2">
+                        <span className="loading loading-spinner loading-xs" />
+                        Loading languages...
+                      </span>
+                    </li>
+                  ) : supportedLanguages.length === 0 ? (
+                    <li className="px-2 py-2 opacity-70">No languages available</li>
+                  ) : (
+                    supportedLanguages
+                      .slice()
+                      .sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || "")))
+                      .map((lang) => {
+                        const code = String(lang?.code || "").trim();
+                        const name = String(lang?.name || code).trim();
+                        if (!code) return null;
+                        const isActive = String(authUser?.nativeLanguage || "").trim() === code;
+                        return (
+                          <li key={`supported-${code}`}>
+                            <button
+                              type="button"
+                              className={isActive ? "active" : ""}
+                              disabled={savingLanguage}
+                              onClick={() => {
+                                if (!code) return;
+                                saveLanguageMutation(code);
+                              }}
+                              title={code}
+                            >
+                              <span className="flex items-center justify-between w-full">
+                                <span className="truncate">{name}</span>
+                                <span className="text-xs opacity-70">{code}</span>
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      })
+                  )}
+                </ul>
+              ) : null}
+            </div>
+
             <div className="dropdown dropdown-end">
               <div tabIndex={0} role="button" className="btn btn-outline btn-sm">
                 Recently Added

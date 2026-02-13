@@ -261,7 +261,9 @@ const setupGoogleCloudWsProxy = (server) => {
       return;
     }
 
-    const myTargetLanguageRaw = (url?.searchParams?.get("target_language") || url?.searchParams?.get("targetLanguage") || "english").trim();
+    // Profile-to-profile translation: each listener receives translation in their own profile nativeLanguage.
+    // Keep reading target_language for backward compatibility, but prefer profile language.
+    const myTargetLanguageRaw = (speakerLanguageRaw || url?.searchParams?.get("target_language") || url?.searchParams?.get("targetLanguage") || "english").trim();
     const myTargetLanguageCode = normalizeLanguageCode(myTargetLanguageRaw) || 'en';
 
     const myUserId = String(speaker?._id || speaker?.id || "");
@@ -397,50 +399,50 @@ const setupGoogleCloudWsProxy = (server) => {
                 if (originalText.trim()) {
                   console.log('[GoogleCloudProxy] Transcript:', originalText);
                   console.log('[GoogleCloudProxy] Is final:', isFinal);
-                  
-                  if (isFinal) {
-                    const currentRoom = getRoom(callId);
-                    if (!currentRoom) return;
 
-                    for (const [, peer] of currentRoom.entries()) {
-                      if (!peer?.ws || peer.userId === myUserId) continue;
+                  const currentRoom = getRoom(callId);
+                  if (!currentRoom) return;
 
-                      let translatedText = null;
-                      const peerTargetCode = normalizeLanguageCode(peer.targetLanguageRaw) || peer.targetLanguageCode || 'en';
+                  for (const [, peer] of currentRoom.entries()) {
+                    if (!peer?.ws || peer.userId === myUserId) continue;
 
-                      if (peerTargetCode !== speakerLanguageCode) {
-                        try {
-                          const translation = await translationService.translateText(
-                            originalText,
-                            peerTargetCode,
-                            speakerLanguageCode
-                          );
-                          translatedText = translation.translatedText;
-                        } catch (translationError) {
-                          console.error('[GoogleCloudProxy] Translation error:', translationError);
-                        }
-                      }
+                    const peerTargetCode = normalizeLanguageCode(peer.nativeLanguage) || 'en';
+                    let translatedText = null;
 
-                      const outgoing = {
-                        type: 'transcript',
-                        original_text: originalText,
-                        original_language: speakerLanguageCode,
-                        translated_text: translatedText,
-                        translated_language: translatedText ? peerTargetCode : null,
-                        is_final: true,
-                        language_code: speakerLanguageCode,
-                        speaker_profile_language: speakerLanguageCode,
-                        speaker_profile_language_raw: speakerLanguageRaw,
-                        target_language: peerTargetCode,
-                        target_language_raw: peer.targetLanguageRaw,
-                        speaker_user_id: myUserId,
-                        speaker_full_name: myUserName,
-                        call_id: callId,
-                      };
+                    // Only translate for FINAL segments (avoid expensive translation on interim).
+                    if (isFinal && peerTargetCode !== speakerLanguageCode) {
                       try {
-                        peer.ws.send(JSON.stringify(outgoing));
-                      } catch {
+                        const translation = await translationService.translateText(
+                          originalText,
+                          peerTargetCode,
+                          speakerLanguageCode
+                        );
+                        translatedText = translation.translatedText;
+                      } catch (translationError) {
+                        console.error('[GoogleCloudProxy] Translation error:', translationError);
                       }
+                    }
+
+                    const outgoing = {
+                      type: 'transcript',
+                      original_text: originalText,
+                      original_language: speakerLanguageCode,
+                      translated_text: translatedText,
+                      translated_language: translatedText ? peerTargetCode : null,
+                      is_final: Boolean(isFinal),
+                      language_code: speakerLanguageCode,
+                      speaker_profile_language: speakerLanguageCode,
+                      speaker_profile_language_raw: speakerLanguageRaw,
+                      target_language: peerTargetCode,
+                      target_language_raw: peer.nativeLanguage,
+                      speaker_user_id: myUserId,
+                      speaker_full_name: myUserName,
+                      call_id: callId,
+                    };
+
+                    try {
+                      peer.ws.send(JSON.stringify(outgoing));
+                    } catch {
                     }
                   }
                 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
-import { getStreamToken, getSupportedTranslationLanguages } from "../lib/api";
+import { getStreamToken, getUserVoiceProfile } from "../lib/api";
 import { ArrowLeftIcon } from "lucide-react";
 
 import {
@@ -148,14 +148,12 @@ const CallContent = ({ callId }) => {
   const { authUser } = useAuthUser();
 
   const [captions, setCaptions] = useState([]);
-  const [captionsEnabled, setCaptionsEnabled] = useState(false);
-  const [targetLanguage, setTargetLanguage] = useState("en");
-  const [supportedLanguages, setSupportedLanguages] = useState([]);
-  const [loadingLanguages, setLoadingLanguages] = useState(false);
-  const [languagesOpen, setLanguagesOpen] = useState(false);
+  const [captionsEnabled, setCaptionsEnabled] = useState(true);
+  const [showCaptions, setShowCaptions] = useState(false);
   const [captionMeta, setCaptionMeta] = useState({});
   const [peerMeta, setPeerMeta] = useState(null);
   const [spokenLanguage, setSpokenLanguage] = useState("english");
+  const peerProfileFetchRef = useRef({ userId: null, inFlight: false });
 
   useEffect(() => {
     const list = Array.isArray(participants) ? participants : [];
@@ -205,12 +203,54 @@ const CallContent = ({ callId }) => {
   }, [authUser?._id, participants]);
 
   useEffect(() => {
+    const opponentId = String(peerMeta?.userId || "");
+    if (!opponentId) return;
+    if (peerMeta?.nativeLanguage) return;
+
+    if (peerProfileFetchRef.current.inFlight) return;
+    if (peerProfileFetchRef.current.userId === opponentId) return;
+
+    peerProfileFetchRef.current = { userId: opponentId, inFlight: true };
+    (async () => {
+      try {
+        const res = await getUserVoiceProfile(opponentId);
+        const nativeLanguage = String(res?.nativeLanguage || "").trim();
+        if (!nativeLanguage) {
+          console.warn("[Captions] Opponent profile returned empty nativeLanguage", { opponentId });
+          return;
+        }
+        setPeerMeta((prev) => {
+          if (!prev || String(prev.userId || "") !== opponentId) return prev;
+          if (prev.nativeLanguage) return prev;
+          const next = { ...prev, nativeLanguage };
+          console.log("[Captions] Fetched opponent nativeLanguage from backend profile:", next);
+          return next;
+        });
+      } catch (e) {
+        console.error("[Captions] Failed to fetch opponent profile language", e);
+      } finally {
+        peerProfileFetchRef.current = { userId: opponentId, inFlight: false };
+      }
+    })();
+  }, [peerMeta?.nativeLanguage, peerMeta?.userId]);
+
+  useEffect(() => {
     const nextSpoken = String(authUser?.nativeLanguage || "english").toLowerCase();
     if (nextSpoken) setSpokenLanguage(nextSpoken);
   }, [authUser?.nativeLanguage]);
 
   const pushCaption = useCallback((c) => {
     setCaptions((prev) => {
+      const replaceId = String(c?.replaceId || "").trim();
+      if (replaceId) {
+        const idx = prev.findIndex((x) => String(x?.replaceId || "").trim() === replaceId);
+        if (idx >= 0) {
+          const next = prev.slice();
+          next[idx] = { ...prev[idx], ...c };
+          return next;
+        }
+      }
+
       const next = [...prev, c];
       return next.length > 8 ? next.slice(next.length - 8) : next;
     });
@@ -232,10 +272,10 @@ const CallContent = ({ callId }) => {
         peerMeta={peerMeta}
         captionsEnabled={captionsEnabled}
         setCaptionsEnabled={setCaptionsEnabled}
+        showCaptions={showCaptions}
+        setShowCaptions={setShowCaptions}
         spokenLanguage={spokenLanguage}
         setSpokenLanguage={setSpokenLanguage}
-        targetLanguage={targetLanguage}
-        setTargetLanguage={setTargetLanguage}
         pushCaption={pushCaption}
         setCaptionMeta={setCaptionMeta}
         setPeerMeta={setPeerMeta}
@@ -244,7 +284,7 @@ const CallContent = ({ callId }) => {
         <div className="flex-1 min-h-0">
           <SpeakerLayout />
         </div>
-        {captionsEnabled ? <CaptionBar captions={captions} meta={captionMeta} peerMeta={peerMeta} /> : null}
+        {showCaptions ? <CaptionBar captions={captions} meta={captionMeta} peerMeta={peerMeta} /> : null}
         <CallControls />
       </div>
     </StreamTheme>
@@ -257,10 +297,10 @@ const CaptionControls = ({
   peerMeta,
   captionsEnabled,
   setCaptionsEnabled,
+  showCaptions,
+  setShowCaptions,
   spokenLanguage,
   setSpokenLanguage,
-  targetLanguage,
-  setTargetLanguage,
   pushCaption,
   setCaptionMeta,
   setPeerMeta,
@@ -275,35 +315,6 @@ const CaptionControls = ({
   const micStreamRef = useRef(null);
   const interimRef = useRef("");
   const silenceTimerRef = useRef(null);
-
-  const [supportedLanguages, setSupportedLanguages] = useState([]);
-  const [languagesOpen, setLanguagesOpen] = useState(false);
-  const [loadingLanguages, setLoadingLanguages] = useState(false);
-
-  const fetchSupportedLanguages = useCallback(async () => {
-    setLoadingLanguages(true);
-    try {
-      console.log('[Captions] Fetching supported languages...');
-      const res = await getSupportedTranslationLanguages({ target: "en" });
-      const items = Array.isArray(res?.languages) ? res.languages : [];
-      
-      if (items.length === 0) {
-        console.warn('[Captions] No languages received from API');
-        toast.error("No supported languages available");
-        return;
-      }
-      
-      items.sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || "")));
-      setSupportedLanguages(items);
-      console.log(`[Captions] Loaded ${items.length} supported languages`);
-    } catch (error) {
-      console.error('[Captions] Error fetching supported languages:', error);
-      const errorMessage = error?.response?.data?.message || error?.message || "Failed to fetch supported languages";
-      toast.error(errorMessage);
-    } finally {
-      setLoadingLanguages(false);
-    }
-  }, []);
 
   const toDeepgramLanguage = (languageKey) => {
     const key = String(languageKey || "").trim().toLowerCase();
@@ -419,7 +430,7 @@ const CaptionControls = ({
       ? origin.replace(/^https:\/\//, "wss://")
       : origin.replace(/^http:\/\//, "ws://");
 
-    const wsUrl = `${wsOrigin}/ws/google-cloud?token=${encodeURIComponent(token)}&callId=${encodeURIComponent(callId || "")}&target_language=${encodeURIComponent(targetLanguage || "en")}`;
+    const wsUrl = `${wsOrigin}/ws/google-cloud?token=${encodeURIComponent(token)}&callId=${encodeURIComponent(callId || "")}`;
 
     let stopped = false;
 
@@ -610,16 +621,19 @@ const CaptionControls = ({
             const originalText = String(data?.original_text || "").trim();
             if (!originalText) return;
 
-            if (data?.is_final !== true) return;
-
+            const isFinal = data?.is_final === true;
             const speakerName = String(data?.speaker_full_name || data?.speaker || "Speaker");
+            const speakerUserId = String(data?.speaker_user_id || "").trim() || speakerName;
 
+            // Interim captions: overwrite the same line per speaker for instant updates
             const originalCaption = {
               id: `${Date.now()}-o`,
+              replaceId: `${speakerUserId}-original`,
               speaker: speakerName,
               text: originalText,
               timestamp: new Date().toISOString(),
               type: "original",
+              isFinal,
               language: data?.speaker_profile_language_raw || "Unknown",
               speaker_profile_language: data?.speaker_profile_language,
               speaker_profile_language_raw: data?.speaker_profile_language_raw,
@@ -628,13 +642,15 @@ const CaptionControls = ({
             };
             pushCaption(originalCaption);
 
-            if (data?.translated_text) {
+            // Only show translation when segment is final (backend only translates on final)
+            if (isFinal && data?.translated_text) {
               const translatedCaption = {
                 id: `${Date.now()}-t`,
                 speaker: speakerName,
                 text: String(data.translated_text || ""),
                 timestamp: new Date().toISOString(),
                 type: "translation",
+                isFinal: true,
                 language: data?.target_language_raw || "Unknown",
                 speaker_profile_language: data?.speaker_profile_language,
                 speaker_profile_language_raw: data?.speaker_profile_language_raw,
@@ -819,7 +835,7 @@ const CaptionControls = ({
 
       interimRef.current = "";
     };
-  }, [authUser?.fullName, call, captionsEnabled, pushCaption, setCaptionsEnabled, targetLanguage]);
+  }, [authUser?.fullName, call, captionsEnabled, pushCaption, setCaptionsEnabled]);
 
   return (
     <div className="absolute top-4 right-4 z-20 flex flex-col gap-3 bg-base-100/95 backdrop-blur-md rounded-2xl border-2 border-primary/20 shadow-xl p-4 min-w-[320px]">
@@ -849,111 +865,30 @@ const CaptionControls = ({
         </div>
       </div>
       
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-medium text-base-content/70">Get Captions:</span>
-        <div className="relative flex-1">
-          <button
-            type="button"
-            className={`btn btn-sm w-full justify-between ${loadingLanguages ? 'btn-disabled' : 'btn-outline'}`}
-            onClick={async () => {
-              const next = !languagesOpen;
-              setLanguagesOpen(next);
-              if (next && supportedLanguages.length === 0 && !loadingLanguages) {
-                await fetchSupportedLanguages();
-              }
-            }}
-            disabled={loadingLanguages}
-          >
-            <span className="truncate">
-              {loadingLanguages ? (
-                <span className="flex items-center gap-2">
-                  <span className="loading loading-spinner loading-xs"></span>
-                  Loading languages...
-                </span>
-              ) : targetLanguage ? (
-                `Language 2: ${targetLanguage}`
-              ) : (
-                "Select Language 2"
-              )}
-            </span>
-            <span className="text-xs opacity-60">
-              {loadingLanguages ? "" : supportedLanguages.length ? `${supportedLanguages.length}` : "0"}
-            </span>
-          </button>
-
-          {languagesOpen ? (
-            <div className="absolute right-0 mt-2 w-[420px] max-w-[80vw] z-30 bg-base-100 border border-base-300 rounded-xl shadow-xl overflow-hidden">
-              <div className="p-3 border-b border-base-300 flex items-center justify-between">
-                <div className="text-xs font-bold text-base-content/70">
-                  Total Languages: {supportedLanguages.length}
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-xs btn-ghost"
-                  onClick={() => setLanguagesOpen(false)}
-                >
-                  Close
-                </button>
-              </div>
-
-              <div className="max-h-[280px] overflow-y-auto">
-                {loadingLanguages ? (
-                  <div className="p-8 flex flex-col items-center justify-center">
-                    <span className="loading loading-spinner loading-md mb-3"></span>
-                    <div className="text-sm text-base-content/60">Loading supported languages...</div>
-                  </div>
-                ) : supportedLanguages.length > 0 ? (
-                  supportedLanguages.map((l) => {
-                    const code = String(l?.language || l?.code || "");
-                    const name = String(l?.name || code);
-                    return (
-                      <button
-                        key={`lang-${code}`}
-                        type="button"
-                        className={`w-full text-left px-3 py-2 hover:bg-base-200 flex items-center justify-between transition-colors ${
-                          code === targetLanguage ? "bg-primary/10 border-l-4 border-primary" : ""
-                        }`}
-                        onClick={() => {
-                          setTargetLanguage(code || "en");
-                          setLanguagesOpen(false);
-                          toast.success(`Language set to: ${name}`);
-                        }}
-                      >
-                        <span className="text-sm truncate font-medium">{name}</span>
-                        <span className="text-xs text-base-content/60 bg-base-200 px-2 py-1 rounded">{code}</span>
-                      </button>
-                    );
-                  })
-                ) : (
-                  <div className="p-8 text-center">
-                    <div className="text-sm text-base-content/60 mb-3">No languages loaded</div>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline"
-                      onClick={() => fetchSupportedLanguages()}
-                    >
-                      Retry
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      </div>
-      
       <div className="flex items-center justify-between">
         <span className="text-xs text-base-content/60">
-          {captionsEnabled ? "🟢 Transcribing..." : "⚫ Inactive"}
+          {captionsEnabled ? "🟢 Engine on" : "⚫ Engine off"}
         </span>
-        <button
-          type="button"
-          className={`btn btn-sm btn-circle ${captionsEnabled ? "btn-error hover:btn-error" : "btn-success hover:btn-success"}`}
-          onClick={() => setCaptionsEnabled((v) => !v)}
-          title={captionsEnabled ? "Stop captions" : "Start captions"}
-        >
-          {captionsEnabled ? "⏹" : "▶"}
-        </button>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className={`btn btn-xs ${showCaptions ? "btn-primary" : "btn-outline"}`}
+            onClick={() => setShowCaptions((v) => !v)}
+            title={showCaptions ? "Hide caption panel" : "Show caption panel"}
+          >
+            {showCaptions ? "Hide" : "Show"}
+          </button>
+
+          <button
+            type="button"
+            className={`btn btn-sm btn-circle ${captionsEnabled ? "btn-error hover:btn-error" : "btn-success hover:btn-success"}`}
+            onClick={() => setCaptionsEnabled((v) => !v)}
+            title={captionsEnabled ? "Stop captions engine" : "Start captions engine"}
+          >
+            {captionsEnabled ? "⏹" : "▶"}
+          </button>
+        </div>
       </div>
     </div>
   );
