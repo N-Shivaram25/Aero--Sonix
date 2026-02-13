@@ -50,7 +50,8 @@ const corsOptions = {
     if (!origin) return callback(null, true);
     
     // Check if origin is in allowed list
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    const normalized = normalizeOrigin(origin);
+    if (allowedOrigins.indexOf(normalized) !== -1 || String(normalized || "").endsWith(".vercel.app")) {
       callback(null, true);
     } else {
       console.log('CORS: Origin not allowed:', origin);

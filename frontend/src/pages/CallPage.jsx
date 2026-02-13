@@ -172,21 +172,13 @@ const CallContent = ({ callId }) => {
 
     const opponentId = String(opponent?.user?.id || opponent?.userId || "");
     const opponentName = String(opponent?.user?.name || opponent?.name || "").trim() || "Opponent";
-    const opponentNativeLanguage =
-      String(opponent?.user?.custom?.nativeLanguage || opponent?.user?.nativeLanguage || "").trim() || null;
-
-    if (!opponentNativeLanguage) {
-      console.warn("[Captions] Opponent nativeLanguage missing from Stream user custom data", {
-        opponentId,
-        opponentName,
-      });
-    }
+    const opponentNativeLanguage = String(opponent?.user?.nativeLanguage || "").trim() || null;
 
     setPeerMeta((prev) => {
       const next = {
         userId: opponentId,
         fullName: opponentName,
-        nativeLanguage: opponentNativeLanguage || prev?.nativeLanguage || null,
+        nativeLanguage: opponentNativeLanguage,
       };
 
       if (
