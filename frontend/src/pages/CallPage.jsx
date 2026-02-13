@@ -329,6 +329,8 @@ const CaptionControls = ({
   const participants = useParticipants();
   const call = useCall();
 
+  const [restartSeq, setRestartSeq] = useState(0);
+
   const callRef = useRef(null);
   const authUserIdRef = useRef("");
 
@@ -344,6 +346,8 @@ const CaptionControls = ({
   const audioCtxRef = useRef(null);
   const processorRef = useRef(null);
   const micStreamRef = useRef(null);
+  const trackRef = useRef(null);
+  const trackHandlersRef = useRef(null);
   const interimRef = useRef("");
   const silenceTimerRef = useRef(null);
 
@@ -513,6 +517,47 @@ const CaptionControls = ({
         console.log("[Captions] Stream audio track:", !!publishedAudio, "Track usable:", isUsableTrack, "Track state:", maybeMediaStreamTrack?.readyState);
 
         if (isUsableTrack) {
+          trackRef.current = maybeMediaStreamTrack;
+          try {
+            if (trackHandlersRef.current?.track === maybeMediaStreamTrack) {
+              // already attached
+            } else {
+              try {
+                if (trackHandlersRef.current?.track && trackHandlersRef.current?.cleanup) {
+                  trackHandlersRef.current.cleanup();
+                }
+              } catch {
+              }
+
+              const onUnmute = () => {
+                if (stopped) return;
+                setRestartSeq((v) => v + 1);
+              };
+              const onEnded = () => {
+                if (stopped) return;
+                setRestartSeq((v) => v + 1);
+              };
+
+              maybeMediaStreamTrack.addEventListener?.("unmute", onUnmute);
+              maybeMediaStreamTrack.addEventListener?.("ended", onEnded);
+
+              trackHandlersRef.current = {
+                track: maybeMediaStreamTrack,
+                cleanup: () => {
+                  try {
+                    maybeMediaStreamTrack.removeEventListener?.("unmute", onUnmute);
+                  } catch {
+                  }
+                  try {
+                    maybeMediaStreamTrack.removeEventListener?.("ended", onEnded);
+                  } catch {
+                  }
+                },
+              };
+            }
+          } catch {
+          }
+
           stream = new MediaStream([maybeMediaStreamTrack]);
           console.log("[Captions] Using Stream audio track");
         } else {
@@ -847,6 +892,13 @@ const CaptionControls = ({
       }
 
       try {
+        trackHandlersRef.current?.cleanup?.();
+      } catch {
+      }
+      trackHandlersRef.current = null;
+      trackRef.current = null;
+
+      try {
         // Check if we're using Stream's microphone or a fallback
         const microphoneState = callRef.current?.microphone?.state;
         let hasStreamTrack = false;
@@ -868,7 +920,7 @@ const CaptionControls = ({
 
       interimRef.current = "";
     };
-  }, [callId, captionsEnabled, pushCaption, setCaptionsEnabled]);
+  }, [callId, captionsEnabled, pushCaption, restartSeq, setCaptionsEnabled]);
 
   return (
     <div className="absolute top-4 right-4 z-20 flex flex-col gap-3 bg-base-100/95 backdrop-blur-md rounded-2xl border-2 border-primary/20 shadow-xl p-4 min-w-[320px]">
