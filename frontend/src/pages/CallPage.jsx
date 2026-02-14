@@ -352,6 +352,7 @@ const CaptionControls = ({
 
   const callRef = useRef(null);
   const authUserIdRef = useRef("");
+  const peerGenderRef = useRef("");
 
   useEffect(() => {
     callRef.current = call;
@@ -360,6 +361,10 @@ const CaptionControls = ({
   useEffect(() => {
     authUserIdRef.current = String(authUser?._id || "");
   }, [authUser?._id]);
+
+  useEffect(() => {
+    peerGenderRef.current = String(peerMeta?.gender || "");
+  }, [peerMeta?.gender]);
 
   const socketRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -381,6 +386,10 @@ const CaptionControls = ({
   const pendingInterimTtsRef = useRef({ text: "", timer: null });
   const utteranceRef = useRef({});
   const ttsOnCompleteRef = useRef(null);
+
+  const SOFT_PAUSE_MS = 1100;
+  const HARD_PAUSE_MS = 3000;
+  const MAX_WORDS = 10;
 
   const stopTts = useCallback(() => {
     try {
@@ -430,8 +439,12 @@ const CaptionControls = ({
       const ac = new AbortController();
       ttsAbortRef.current = ac;
 
-      const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-      console.log("[TTS] Streaming start", { voiceId, text: String(text || "").slice(0, 300) });
+      const nowPerf = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+      const toSec = (ms) => Math.round((Number(ms) / 1000) * 100) / 100;
+      const overallStart = nowPerf();
+      const requestStart = nowPerf();
+      console.log("[TTS] Translated text received", { text: String(text || "").slice(0, 300) });
+      console.log("[TTS] Streaming request start", { voiceId });
 
       const audio = new Audio();
       audio.preload = "auto";
@@ -465,6 +478,12 @@ const CaptionControls = ({
         audio.onended = () => {
           try {
             console.log("[TTS] Play completed", { spokenText: String(text || "").slice(0, 600) });
+          } catch {
+          }
+          try {
+            const tEnd = nowPerf();
+            const ms = Math.round(tEnd - overallStart);
+            console.log("[TTS] Total time", { ms, s: toSec(ms) });
           } catch {
           }
           try {
@@ -540,6 +559,7 @@ const CaptionControls = ({
           }
 
           let firstChunkLogged = false;
+          let playbackStartedLogged = false;
           const reader = response.body.getReader();
 
           const appendChunk = (chunk) =>
@@ -571,14 +591,23 @@ const CaptionControls = ({
               if (done) break;
               if (!firstChunkLogged) {
                 firstChunkLogged = true;
-                const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-                console.log("[TTS] Streaming first chunk", { ms: Math.round(now - startedAt) });
+                const tFirstByte = nowPerf();
+                const ms = Math.round(tFirstByte - requestStart);
+                console.log("[TTS] First audio byte", { ms, s: toSec(ms) });
                 try {
                   const p = audio.play();
                   if (p && typeof p.catch === "function") p.catch(() => {});
                 } catch {
                 }
               }
+
+              if (!playbackStartedLogged && audio && !audio.paused) {
+                playbackStartedLogged = true;
+                const tPlay = nowPerf();
+                const ms = Math.round(tPlay - overallStart);
+                console.log("[TTS] Playback started", { ms, s: toSec(ms) });
+              }
+
               await appendChunk(value);
             }
             try {
@@ -1145,8 +1174,12 @@ const CaptionControls = ({
             const seg = utteranceRef.current[segKey] || {
               idx: 0,
               pauseTimer: null,
+              softTimer: null,
+              hardTimer: null,
               lastOriginal: "",
               lastTranslated: "",
+              lastUpdateAtMs: 0,
+              wordCount: 0,
               spoken: false,
               rescheduleCount: 0,
             };
@@ -1171,7 +1204,7 @@ const CaptionControls = ({
               utteranceRef.current[segKey] = seg;
 
               try {
-                enqueueTtsRef.current?.(translated, peerMeta?.gender, { utteranceKey });
+                enqueueTtsRef.current?.(translated, peerGenderRef.current, { utteranceKey });
               } catch {
               }
 
@@ -1180,12 +1213,24 @@ const CaptionControls = ({
               seg.spoken = false;
               seg.lastOriginal = "";
               seg.lastTranslated = "";
+              seg.lastUpdateAtMs = 0;
+              seg.wordCount = 0;
               seg.rescheduleCount = 0;
               utteranceRef.current[segKey] = seg;
             };
 
             try {
               if (seg.pauseTimer) clearTimeout(seg.pauseTimer);
+            } catch {
+            }
+
+            try {
+              if (seg.softTimer) clearTimeout(seg.softTimer);
+            } catch {
+            }
+
+            try {
+              if (seg.hardTimer) clearTimeout(seg.hardTimer);
             } catch {
             }
 
@@ -1208,6 +1253,11 @@ const CaptionControls = ({
             pushCaption(originalCaption);
 
             seg.lastOriginal = originalText;
+            seg.lastUpdateAtMs = Date.now();
+            seg.wordCount = String(originalText || "")
+              .trim()
+              .split(/\s+/)
+              .filter(Boolean).length;
 
             if (data?.translated_text) {
               const translatedCaption = {
@@ -1235,7 +1285,16 @@ const CaptionControls = ({
               if (isFinal) {
                 finalizeUtterance();
               } else {
-                seg.pauseTimer = setTimeout(finalizeUtterance, 900);
+                // Hybrid segmentation:
+                // - Soft pause for low latency
+                // - Hard pause for explicit sentence boundary
+                // - Max words to avoid long buffering
+                if (seg.wordCount >= MAX_WORDS && String(seg.lastTranslated || "").trim()) {
+                  finalizeUtterance();
+                } else {
+                  seg.softTimer = setTimeout(finalizeUtterance, SOFT_PAUSE_MS);
+                  seg.hardTimer = setTimeout(finalizeUtterance, HARD_PAUSE_MS);
+                }
                 utteranceRef.current[segKey] = seg;
               }
             }
@@ -1538,12 +1597,12 @@ const CaptionBar = ({
     }
 
     return (
-      <div className="space-y-2 max-h-[220px] overflow-y-auto">
-        {items.slice(-6).map((c, index) => (
+      <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
+        {items.slice(-12).map((c, index) => (
           <div
             key={c.id}
             className={`p-3 rounded-lg border bg-base-200/40 border-base-300/60 ${
-              index === items.slice(-6).length - 1 ? "ring-2 ring-primary/20" : ""
+              index === items.slice(-12).length - 1 ? "ring-2 ring-primary/20" : ""
             }`}
           >
             <div className="flex items-center justify-between">
@@ -1579,7 +1638,7 @@ const CaptionBar = ({
 
   return (
     <div className="w-full px-4 pb-2">
-      <div className="bg-base-100/90 backdrop-blur-md rounded-2xl border border-base-300 shadow-lg p-4">
+      <div className="bg-base-100/90 backdrop-blur-md rounded-2xl border border-base-300 shadow-lg p-4 max-w-[1200px] mx-auto">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 bg-success rounded-full animate-pulse"></div>
