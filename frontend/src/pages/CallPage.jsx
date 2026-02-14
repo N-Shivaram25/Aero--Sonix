@@ -224,6 +224,7 @@ const CallContent = ({ callId }) => {
       try {
         const res = await getUserVoiceProfile(opponentId);
         const nativeLanguage = String(res?.nativeLanguage || "").trim();
+        const gender = String(res?.gender || "").trim();
         if (!nativeLanguage) {
           console.warn("[Captions] Opponent profile returned empty nativeLanguage", { opponentId });
           return;
@@ -231,7 +232,7 @@ const CallContent = ({ callId }) => {
         setPeerMeta((prev) => {
           if (!prev || String(prev.userId || "") !== opponentId) return prev;
           if (prev.nativeLanguage) return prev;
-          const next = { ...prev, nativeLanguage };
+          const next = { ...prev, nativeLanguage, gender: gender || prev?.gender || "" };
           console.log("[Captions] Fetched opponent nativeLanguage from backend profile:", next);
           return next;
         });
@@ -333,6 +334,10 @@ const CaptionControls = ({
   const { useParticipants } = useCallStateHooks();
   const participants = useParticipants();
   const call = useCall();
+
+  const ELEVENLABS_API_KEY = import.meta.env.VITE_ELEVENLABS_API_KEY;
+  const ELEVENLABS_MALE_VOICE_ID = import.meta.env.VITE_ELEVENLABS_MALE_VOICE_ID;
+  const ELEVENLABS_FEMALE_VOICE_ID = import.meta.env.VITE_ELEVENLABS_FEMALE_VOICE_ID;
 
   const [restartSeq, setRestartSeq] = useState(0);
 
@@ -437,7 +442,7 @@ const CaptionControls = ({
     }
   }, [stopTts]);
 
-  const enqueueTts = useCallback(async (text) => {
+  const enqueueTts = useCallback(async (text, gender) => {
     if (!interpretationModeRef.current) return;
     const clean = String(text || "").trim();
     if (!clean) return;
@@ -459,12 +464,55 @@ const CaptionControls = ({
     }
 
     try {
-      const speakerUserId = String(authUserIdRef.current || "");
-      const resp = await callTts({ text: clean, speakerUserId });
-      const buf = resp?.data;
-      if (!buf) return;
-      const blob = new Blob([buf], { type: "audio/mpeg" });
-      const url = URL.createObjectURL(blob);
+      const g = String(gender || "").toLowerCase();
+      const voiceId = g === "female" ? ELEVENLABS_FEMALE_VOICE_ID : ELEVENLABS_MALE_VOICE_ID;
+
+      if (!ELEVENLABS_API_KEY || !voiceId) {
+        console.warn("[TTS] Missing VITE_ELEVENLABS_API_KEY or voice id; falling back to backend /call/tts");
+        const speakerUserId = String(authUserIdRef.current || "");
+        const resp = await callTts({ text: clean, speakerUserId });
+        const buf = resp?.data;
+        if (!buf) return;
+        const blob = new Blob([buf], { type: "audio/mpeg" });
+        const url = URL.createObjectURL(blob);
+        ttsQueueRef.current.push({ url, text: clean });
+        if (!ttsPlayingRef.current) {
+          playNextTts();
+        }
+        return;
+      }
+
+      console.log("[TTS] Frontend ElevenLabs request", {
+        gender: g || "unknown",
+        voiceId,
+        text: clean.slice(0, 600),
+      });
+
+      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+        method: "POST",
+        headers: {
+          "xi-api-key": String(ELEVENLABS_API_KEY),
+          "Content-Type": "application/json",
+          Accept: "audio/mpeg",
+        },
+        body: JSON.stringify({
+          text: clean,
+          model_id: "eleven_multilingual_v2",
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        console.error("[TTS] ElevenLabs HTTP error", { status: response.status, body: errText });
+        return;
+      }
+
+      const audioBlob = await response.blob();
+      const url = URL.createObjectURL(audioBlob);
       ttsQueueRef.current.push({ url, text: clean });
       if (!ttsPlayingRef.current) {
         playNextTts();
@@ -990,7 +1038,7 @@ const CaptionControls = ({
             // TTS only for final translated segments from remote speakers.
             if (!isLocalSpeaker && isFinal && data?.translated_text && interpretationModeRef.current) {
               try {
-                enqueueTtsRef.current?.(String(data.translated_text || ""));
+                enqueueTtsRef.current?.(String(data.translated_text || ""), peerMeta?.gender);
               } catch {
               }
             }
