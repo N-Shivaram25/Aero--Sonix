@@ -628,7 +628,18 @@ const CaptionControls = ({
       try {
         // Kick off playback pipeline; actual audio starts on first appended data.
         const p = audio.play();
-        if (p && typeof p.catch === "function") p.catch(() => {});
+        if (p && typeof p.catch === "function") {
+          p.catch((e) => {
+            try {
+              console.warn("[TTS] audio.play() blocked", e?.message || e);
+            } catch {
+            }
+            try {
+              toast.error("TTS playback blocked by browser autoplay policy. Click once on the page and try again.");
+            } catch {
+            }
+          });
+        }
       } catch {
       }
 
@@ -654,6 +665,10 @@ const CaptionControls = ({
 
     if (!ELEVENLABS_API_KEY || !voiceId) {
       console.warn("[TTS] Missing VITE_ELEVENLABS_API_KEY or voice id; cannot play TTS");
+      try {
+        toast.error("TTS is ON but ElevenLabs key/voice id is missing in frontend .env");
+      } catch {
+      }
       ttsPlayingRef.current = false;
       return;
     }
@@ -1539,6 +1554,29 @@ const CaptionControls = ({
             onClick={() =>
               setInterpretationMode((v) => {
                 const next = !v;
+                if (next) {
+                  try {
+                    setShowCaptions(true);
+                  } catch {
+                  }
+                  try {
+                    const a = new Audio();
+                    a.muted = true;
+                    const p = a.play();
+                    if (p && typeof p.catch === "function") p.catch(() => {});
+                  } catch {
+                  }
+                  try {
+                    const hasKey = Boolean(String(ELEVENLABS_API_KEY || "").trim());
+                    const hasMale = Boolean(String(ELEVENLABS_MALE_VOICE_ID || "").trim());
+                    const hasFemale = Boolean(String(ELEVENLABS_FEMALE_VOICE_ID || "").trim());
+                    console.log("[TTS] ElevenLabs env present", { hasKey, hasMaleVoiceId: hasMale, hasFemaleVoiceId: hasFemale });
+                    if (!hasKey || (!hasMale && !hasFemale)) {
+                      toast.error("Missing ElevenLabs frontend env vars. Check VITE_ELEVENLABS_API_KEY and voice IDs.");
+                    }
+                  } catch {
+                  }
+                }
                 try {
                   console.log("[TTS] Interpretation Mode:", next ? "ON" : "OFF");
                 } catch {
