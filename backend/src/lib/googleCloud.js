@@ -133,12 +133,34 @@ class GoogleCloudSTT {
   getSpeechConfig(languageCode) {
     const normalizedCode = normalizeLanguageCode(languageCode) || 'en';
     const googleCode = googleCloudLanguageMap[normalizedCode] || 'en-US';
+
+    const phrasesRaw = String(process.env.GOOGLE_STT_CONTEXT_PHRASES || '').trim();
+    const boostRaw = String(process.env.GOOGLE_STT_CONTEXT_BOOST || '').trim();
+    const phrases = phrasesRaw
+      ? phrasesRaw
+          .split(',')
+          .map((p) => String(p || '').trim())
+          .filter(Boolean)
+          .slice(0, 500)
+      : [];
+    const boost = boostRaw ? Number(boostRaw) : null;
+    const speechContexts = phrases.length
+      ? [
+          {
+            phrases,
+            ...(Number.isFinite(boost) ? { boost } : {}),
+          },
+        ]
+      : undefined;
     
     return {
       encoding: "LINEAR16",
       sampleRateHertz: 16000,
       languageCode: googleCode,
       enableAutomaticPunctuation: true,
+      model: "latest_short",
+      useEnhanced: true,
+      ...(speechContexts ? { speechContexts } : {}),
     };
   }
 

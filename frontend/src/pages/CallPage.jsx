@@ -214,7 +214,9 @@ const CallContent = ({ callId }) => {
   useEffect(() => {
     const opponentId = String(peerMeta?.userId || "");
     if (!opponentId) return;
-    if (peerMeta?.nativeLanguage) return;
+    const needsNativeLanguage = !peerMeta?.nativeLanguage;
+    const needsGender = !peerMeta?.gender;
+    if (!needsNativeLanguage && !needsGender) return;
 
     if (peerProfileFetchRef.current.inFlight) return;
     if (peerProfileFetchRef.current.userId === opponentId) return;
@@ -225,15 +227,17 @@ const CallContent = ({ callId }) => {
         const res = await getUserVoiceProfile(opponentId);
         const nativeLanguage = String(res?.nativeLanguage || "").trim();
         const gender = String(res?.gender || "").trim();
-        if (!nativeLanguage) {
-          console.warn("[Captions] Opponent profile returned empty nativeLanguage", { opponentId });
-          return;
-        }
         setPeerMeta((prev) => {
           if (!prev || String(prev.userId || "") !== opponentId) return prev;
-          if (prev.nativeLanguage) return prev;
-          const next = { ...prev, nativeLanguage, gender: gender || prev?.gender || "" };
-          console.log("[Captions] Fetched opponent nativeLanguage from backend profile:", next);
+          const next = {
+            ...prev,
+            ...(nativeLanguage ? { nativeLanguage } : {}),
+            ...(gender ? { gender } : {}),
+          };
+
+          if (prev.nativeLanguage !== next.nativeLanguage || prev.gender !== next.gender) {
+            console.log("[Captions] Fetched opponent voice profile from backend:", next);
+          }
           return next;
         });
       } catch (e) {
@@ -242,7 +246,7 @@ const CallContent = ({ callId }) => {
         peerProfileFetchRef.current = { userId: opponentId, inFlight: false };
       }
     })();
-  }, [peerMeta?.nativeLanguage, peerMeta?.userId]);
+  }, [peerMeta?.gender, peerMeta?.nativeLanguage, peerMeta?.userId]);
 
   useEffect(() => {
     const nextSpoken = String(authUser?.nativeLanguage || "english").toLowerCase();
@@ -262,7 +266,12 @@ const CallContent = ({ callId }) => {
       }
 
       const next = [...prev, c];
-      return next.length > 8 ? next.slice(next.length - 8) : next;
+
+      // Keep enough rows so that a full "utterance" (original + translation) can stay visible
+      // until TTS completes, then we remove that utteranceKey.
+      // Aggressively trimming here causes rows to disappear early.
+      const max = 50;
+      return next.length > max ? next.slice(next.length - max) : next;
     });
   }, []);
 
@@ -370,6 +379,8 @@ const CaptionControls = ({
   const enqueueTtsRef = useRef(null);
   const ttsAbortRef = useRef(null);
   const pendingInterimTtsRef = useRef({ text: "", timer: null });
+  const utteranceRef = useRef({});
+  const ttsOnCompleteRef = useRef(null);
 
   const stopTts = useCallback(() => {
     try {
@@ -398,7 +409,7 @@ const CaptionControls = ({
   }, []);
 
   const streamElevenLabsTts = useCallback(
-    async ({ text, voiceId, apiKey }) => {
+    async ({ text, voiceId, apiKey, onDone }) => {
       const mimeCandidates = ['audio/mpeg; codecs="mp3"', "audio/mpeg"];
       const supportedMime = mimeCandidates.find((m) => {
         try {
@@ -454,6 +465,10 @@ const CaptionControls = ({
         audio.onended = () => {
           try {
             console.log("[TTS] Play completed", { spokenText: String(text || "").slice(0, 600) });
+          } catch {
+          }
+          try {
+            onDone?.();
           } catch {
           }
           cleanup();
@@ -604,65 +619,47 @@ const CaptionControls = ({
       return;
     }
 
-    ttsPlayingRef.current = true;
-    const audio = new Audio(next.url);
-    ttsAudioRef.current = audio;
+    const { text, gender, meta } = next;
+    const g = String(gender || "").toLowerCase();
+    const voiceId = g === "female" ? ELEVENLABS_FEMALE_VOICE_ID : ELEVENLABS_MALE_VOICE_ID;
 
-    audio.onended = () => {
-      try {
-        console.log("[TTS] Play completed", {
-          spokenText: String(next?.text || "").slice(0, 600),
-        });
-      } catch {
-      }
-      try {
-        URL.revokeObjectURL(next.url);
-      } catch {
-      }
-      playNextTts();
-    };
-    audio.onerror = () => {
-      try {
-        console.error("[TTS] Audio playback error", {
-          spokenText: String(next?.text || "").slice(0, 600),
-        });
-      } catch {
-      }
-      try {
-        URL.revokeObjectURL(next.url);
-      } catch {
-      }
-      playNextTts();
-    };
-
-    try {
-      const p = audio.play();
-      if (p && typeof p.then === "function") {
-        p.catch(() => {
-          playNextTts();
-        });
-      }
-    } catch {
-      playNextTts();
+    if (!ELEVENLABS_API_KEY || !voiceId) {
+      console.warn("[TTS] Missing VITE_ELEVENLABS_API_KEY or voice id; cannot play TTS");
+      ttsPlayingRef.current = false;
+      return;
     }
-  }, [stopTts]);
 
-  const enqueueTts = useCallback(async (text, gender, { interrupt } = {}) => {
+    ttsPlayingRef.current = true;
+    lastTtsTextRef.current = String(text || "").trim();
+
+    const onDone = () => {
+      try {
+        ttsOnCompleteRef.current?.(meta);
+      } catch {
+      }
+      playNextTts();
+    };
+
+    streamElevenLabsTts({
+      text,
+      voiceId,
+      apiKey: ELEVENLABS_API_KEY,
+      onDone,
+    }).catch((e) => {
+      if (e?.name === "AbortError") return;
+      console.error("[TTS] Streaming failed", e?.message || e);
+      ttsPlayingRef.current = false;
+      playNextTts();
+    });
+  }, [ELEVENLABS_API_KEY, ELEVENLABS_FEMALE_VOICE_ID, ELEVENLABS_MALE_VOICE_ID, stopTts, streamElevenLabsTts]);
+
+  const enqueueTts = useCallback(async (text, gender, meta) => {
     if (!interpretationModeRef.current) return;
     const clean = String(text || "").trim();
     if (!clean) return;
 
-    if (interrupt) {
-      try {
-        console.log("[TTS] Interrupting previous playback for newer text");
-      } catch {
-      }
-      stopTts();
-    }
-
-    // Prevent repeating the same phrase too often (common with interim updates).
+    // Prevent repeating the same phrase.
     if (lastTtsTextRef.current === clean) return;
-    lastTtsTextRef.current = clean;
 
     try {
       console.log("[TTS] ON - ElevenLabs voice is using translated text", {
@@ -676,108 +673,9 @@ const CaptionControls = ({
     } catch {
     }
 
-    try {
-      const g = String(gender || "").toLowerCase();
-      const voiceId = g === "female" ? ELEVENLABS_FEMALE_VOICE_ID : ELEVENLABS_MALE_VOICE_ID;
-
-      if (!ELEVENLABS_API_KEY || !voiceId) {
-        console.warn("[TTS] Missing VITE_ELEVENLABS_API_KEY or voice id; falling back to backend /call/tts");
-        const speakerUserId = String(authUserIdRef.current || "");
-        const resp = await callTts({ text: clean, speakerUserId });
-        const buf = resp?.data;
-        if (!buf) return;
-        const blob = new Blob([buf], { type: "audio/mpeg" });
-        const url = URL.createObjectURL(blob);
-        ttsQueueRef.current.push({ url, text: clean });
-        if (!ttsPlayingRef.current) {
-          playNextTts();
-        }
-        return;
-      }
-
-      console.log("[TTS] Frontend ElevenLabs request", {
-        gender: g || "unknown",
-        voiceId,
-        text: clean.slice(0, 600),
-      });
-
-      // Prefer streaming playback to reduce latency.
-      try {
-        await streamElevenLabsTts({ text: clean, voiceId, apiKey: ELEVENLABS_API_KEY });
-        return;
-      } catch (e) {
-        console.warn("[TTS] Streaming unavailable; falling back to non-streaming", e?.message);
-      }
-
-      try {
-        if (ttsAbortRef.current) ttsAbortRef.current.abort();
-      } catch {
-      }
-      const ac = new AbortController();
-      ttsAbortRef.current = ac;
-
-      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
-        method: "POST",
-        headers: {
-          "xi-api-key": String(ELEVENLABS_API_KEY),
-          "Content-Type": "application/json",
-          Accept: "audio/mpeg",
-        },
-        signal: ac.signal,
-        body: JSON.stringify({
-          text: clean,
-          model_id: "eleven_multilingual_v2",
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75,
-          },
-        }),
-      });
-
-      if (!response.ok) {
-        const errText = await response.text().catch(() => "");
-        console.error("[TTS] ElevenLabs HTTP error", { status: response.status, body: errText });
-        return;
-      }
-
-      const audioBlob = await response.blob();
-      const url = URL.createObjectURL(audioBlob);
-      ttsQueueRef.current.push({ url, text: clean });
-      ttsAbortRef.current = null;
-      if (!ttsPlayingRef.current) {
-        playNextTts();
-      }
-    } catch (error) {
-      if (error?.name === "AbortError") {
-        console.log("[TTS] Request aborted (newer text arrived)");
-        return;
-      }
-      const status = error?.response?.status;
-      const data = error?.response?.data;
-      let decodedData = data;
-      let decodedMessage = "";
-
-      try {
-        if (data && (data instanceof ArrayBuffer || ArrayBuffer.isView(data))) {
-          const ab = data instanceof ArrayBuffer ? data : data.buffer;
-          const text = new TextDecoder("utf-8").decode(new Uint8Array(ab));
-          decodedMessage = text;
-          try {
-            decodedData = JSON.parse(text);
-          } catch {
-            decodedData = text;
-          }
-        }
-      } catch {
-      }
-
-      const message =
-        decodedData?.message ||
-        decodedMessage ||
-        data?.message ||
-        error?.message ||
-        "TTS request failed";
-      console.error("[TTS] /call/tts failed", { status, message, data: decodedData });
+    ttsQueueRef.current.push({ text: clean, gender, meta });
+    if (!ttsPlayingRef.current) {
+      playNextTts();
     }
   }, [playNextTts]);
 
@@ -788,6 +686,14 @@ const CaptionControls = ({
   useEffect(() => {
     enqueueTtsRef.current = enqueueTts;
   }, [enqueueTts]);
+
+  useEffect(() => {
+    ttsOnCompleteRef.current = (meta) => {
+      const utteranceKey = String(meta?.utteranceKey || "").trim();
+      if (!utteranceKey) return;
+      setCaptions((prev) => prev.filter((c) => String(c?.utteranceKey || "") !== utteranceKey));
+    };
+  }, []);
 
   const toDeepgramLanguage = (languageKey) => {
     const key = String(languageKey || "").trim().toLowerCase();
@@ -1234,10 +1140,60 @@ const CaptionControls = ({
               : String(data?.speaker_full_name || data?.speaker || "Speaker");
             const speakerUserId = String(data?.speaker_user_id || "").trim() || speakerName;
 
-            // Interim captions: overwrite the same line per speaker for instant updates
+            // Pause-based utterance segmentation (per speaker).
+            const segKey = String(speakerUserId || "");
+            const seg = utteranceRef.current[segKey] || {
+              idx: 0,
+              pauseTimer: null,
+              lastOriginal: "",
+              lastTranslated: "",
+              spoken: false,
+              rescheduleCount: 0,
+            };
+
+            const utteranceKey = `${segKey}::${seg.idx}`;
+
+            const finalizeUtterance = () => {
+              const translated = String(seg.lastTranslated || "").trim();
+              const original = String(seg.lastOriginal || "").trim();
+              if (!translated || !original) {
+                // If translation isn't ready yet, retry briefly (avoid losing speech on slow translation).
+                if (seg.rescheduleCount < 4) {
+                  seg.rescheduleCount += 1;
+                  seg.pauseTimer = setTimeout(finalizeUtterance, 250);
+                  utteranceRef.current[segKey] = seg;
+                }
+                return;
+              }
+              if (seg.spoken) return;
+              seg.spoken = true;
+              seg.rescheduleCount = 0;
+              utteranceRef.current[segKey] = seg;
+
+              try {
+                enqueueTtsRef.current?.(translated, peerMeta?.gender, { utteranceKey });
+              } catch {
+              }
+
+              // Prepare next utterance slot.
+              seg.idx += 1;
+              seg.spoken = false;
+              seg.lastOriginal = "";
+              seg.lastTranslated = "";
+              seg.rescheduleCount = 0;
+              utteranceRef.current[segKey] = seg;
+            };
+
+            try {
+              if (seg.pauseTimer) clearTimeout(seg.pauseTimer);
+            } catch {
+            }
+
+            // Captions: overwrite the same line per current utterance.
             const originalCaption = {
               id: `${Date.now()}-o`,
-              replaceId: `${speakerUserId}-original`,
+              replaceId: `${utteranceKey}-original`,
+              utteranceKey,
               speaker: speakerName,
               text: originalText,
               timestamp: new Date().toISOString(),
@@ -1251,10 +1207,13 @@ const CaptionControls = ({
             };
             pushCaption(originalCaption);
 
+            seg.lastOriginal = originalText;
+
             if (data?.translated_text) {
               const translatedCaption = {
                 id: `${Date.now()}-t`,
-                replaceId: `${speakerUserId}-translation`,
+                replaceId: `${utteranceKey}-translation`,
+                utteranceKey,
                 speaker: speakerName,
                 text: String(data.translated_text || ""),
                 timestamp: new Date().toISOString(),
@@ -1267,52 +1226,17 @@ const CaptionControls = ({
                 target_language_raw: data?.target_language_raw,
               };
               pushCaption(translatedCaption);
+
+              seg.lastTranslated = String(data.translated_text || "");
             }
 
-            // Low-latency TTS for remote speakers.
-            // - Final transcripts: speak immediately (interrupt).
-            // - Interim transcripts: debounce and speak most recent translation (interrupt).
-            if (!isLocalSpeaker && data?.translated_text && interpretationModeRef.current) {
-              const nextText = String(data.translated_text || "").trim();
-              if (nextText) {
-                if (isFinal) {
-                  try {
-                    if (pendingInterimTtsRef.current.timer) {
-                      clearTimeout(pendingInterimTtsRef.current.timer);
-                    }
-                  } catch {
-                  }
-                  pendingInterimTtsRef.current = { text: "", timer: null };
-                  try {
-                    enqueueTtsRef.current?.(nextText, peerMeta?.gender, { interrupt: true });
-                  } catch {
-                  }
-                } else {
-                  const prevPending = String(pendingInterimTtsRef.current.text || "");
-                  pendingInterimTtsRef.current.text = nextText;
-                  try {
-                    if (pendingInterimTtsRef.current.timer) {
-                      clearTimeout(pendingInterimTtsRef.current.timer);
-                    }
-                  } catch {
-                  }
-                  // Avoid firing too early on very short fragments.
-                  const delayMs = nextText.length < 10 ? 450 : 250;
-                  pendingInterimTtsRef.current.timer = setTimeout(() => {
-                    try {
-                      const t = String(pendingInterimTtsRef.current.text || "").trim();
-                      pendingInterimTtsRef.current = { text: "", timer: null };
-                      if (!t) return;
-                      enqueueTtsRef.current?.(t, peerMeta?.gender, { interrupt: true });
-                    } catch {
-                    }
-                  }, delayMs);
-
-                  // If translation is not changing (duplicate interim), don't keep rescheduling forever.
-                  if (prevPending && prevPending === nextText) {
-                    // keep current schedule
-                  }
-                }
+            // Speak only once per utterance (on final or pause), to avoid repeats and 429.
+            if (!isLocalSpeaker && interpretationModeRef.current) {
+              if (isFinal) {
+                finalizeUtterance();
+              } else {
+                seg.pauseTimer = setTimeout(finalizeUtterance, 900);
+                utteranceRef.current[segKey] = seg;
               }
             }
           };
@@ -1451,6 +1375,17 @@ const CaptionControls = ({
 
       try {
         if (pendingInterimTtsRef.current.timer) clearTimeout(pendingInterimTtsRef.current.timer);
+      } catch {
+      }
+
+      try {
+        const map = utteranceRef.current || {};
+        for (const k of Object.keys(map)) {
+          try {
+            if (map[k]?.pauseTimer) clearTimeout(map[k].pauseTimer);
+          } catch {
+          }
+        }
       } catch {
       }
 
