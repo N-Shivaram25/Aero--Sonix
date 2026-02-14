@@ -261,7 +261,23 @@ export async function tts(req, res) {
     return res.status(200).send(buffer);
   } catch (error) {
     console.error("Error in tts controller", error);
-    return res.status(500).json({ message: "Internal Server Error" });
+
+    const rawMessage =
+      error?.message ||
+      error?.response?.data?.message ||
+      error?.response?.data?.error ||
+      "Internal Server Error";
+    const message = String(rawMessage || "Internal Server Error");
+
+    // Surface common configuration issues explicitly
+    if (message.includes("ELEVENLABS_API_KEY")) {
+      return res.status(500).json({ message });
+    }
+    if (message.toLowerCase().includes("voice") && message.toLowerCase().includes("not")) {
+      return res.status(500).json({ message });
+    }
+
+    return res.status(500).json({ message });
   }
 }
 

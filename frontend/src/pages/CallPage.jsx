@@ -445,8 +445,11 @@ const CaptionControls = ({
       if (!ttsPlayingRef.current) {
         playNextTts();
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      const status = error?.response?.status;
+      const data = error?.response?.data;
+      const message = data?.message || error?.message || "TTS request failed";
+      console.error("[TTS] /call/tts failed", { status, message, data });
     }
   }, [playNextTts]);
 
