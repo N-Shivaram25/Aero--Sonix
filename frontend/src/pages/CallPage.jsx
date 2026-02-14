@@ -352,7 +352,6 @@ const CaptionControls = ({
 
   const callRef = useRef(null);
   const authUserIdRef = useRef("");
-  const peerGenderRef = useRef("");
 
   useEffect(() => {
     callRef.current = call;
@@ -361,10 +360,6 @@ const CaptionControls = ({
   useEffect(() => {
     authUserIdRef.current = String(authUser?._id || "");
   }, [authUser?._id]);
-
-  useEffect(() => {
-    peerGenderRef.current = String(peerMeta?.gender || "");
-  }, [peerMeta?.gender]);
 
   const socketRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -386,10 +381,6 @@ const CaptionControls = ({
   const pendingInterimTtsRef = useRef({ text: "", timer: null });
   const utteranceRef = useRef({});
   const ttsOnCompleteRef = useRef(null);
-
-  const SOFT_PAUSE_MS = 1100;
-  const HARD_PAUSE_MS = 3000;
-  const MAX_WORDS = 10;
 
   const stopTts = useCallback(() => {
     try {
@@ -439,12 +430,8 @@ const CaptionControls = ({
       const ac = new AbortController();
       ttsAbortRef.current = ac;
 
-      const nowPerf = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
-      const toSec = (ms) => Math.round((Number(ms) / 1000) * 100) / 100;
-      const overallStart = nowPerf();
-      const requestStart = nowPerf();
-      console.log("[TTS] Translated text received", { text: String(text || "").slice(0, 300) });
-      console.log("[TTS] Streaming request start", { voiceId });
+      const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+      console.log("[TTS] Streaming start", { voiceId, text: String(text || "").slice(0, 300) });
 
       const audio = new Audio();
       audio.preload = "auto";
@@ -478,12 +465,6 @@ const CaptionControls = ({
         audio.onended = () => {
           try {
             console.log("[TTS] Play completed", { spokenText: String(text || "").slice(0, 600) });
-          } catch {
-          }
-          try {
-            const tEnd = nowPerf();
-            const ms = Math.round(tEnd - overallStart);
-            console.log("[TTS] Total time", { ms, s: toSec(ms) });
           } catch {
           }
           try {
@@ -559,7 +540,6 @@ const CaptionControls = ({
           }
 
           let firstChunkLogged = false;
-          let playbackStartedLogged = false;
           const reader = response.body.getReader();
 
           const appendChunk = (chunk) =>
@@ -591,23 +571,14 @@ const CaptionControls = ({
               if (done) break;
               if (!firstChunkLogged) {
                 firstChunkLogged = true;
-                const tFirstByte = nowPerf();
-                const ms = Math.round(tFirstByte - requestStart);
-                console.log("[TTS] First audio byte", { ms, s: toSec(ms) });
+                const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+                console.log("[TTS] Streaming first chunk", { ms: Math.round(now - startedAt) });
                 try {
                   const p = audio.play();
                   if (p && typeof p.catch === "function") p.catch(() => {});
                 } catch {
                 }
               }
-
-              if (!playbackStartedLogged && audio && !audio.paused) {
-                playbackStartedLogged = true;
-                const tPlay = nowPerf();
-                const ms = Math.round(tPlay - overallStart);
-                console.log("[TTS] Playback started", { ms, s: toSec(ms) });
-              }
-
               await appendChunk(value);
             }
             try {
@@ -628,18 +599,7 @@ const CaptionControls = ({
       try {
         // Kick off playback pipeline; actual audio starts on first appended data.
         const p = audio.play();
-        if (p && typeof p.catch === "function") {
-          p.catch((e) => {
-            try {
-              console.warn("[TTS] audio.play() blocked", e?.message || e);
-            } catch {
-            }
-            try {
-              toast.error("TTS playback blocked by browser autoplay policy. Click once on the page and try again.");
-            } catch {
-            }
-          });
-        }
+        if (p && typeof p.catch === "function") p.catch(() => {});
       } catch {
       }
 
@@ -665,10 +625,6 @@ const CaptionControls = ({
 
     if (!ELEVENLABS_API_KEY || !voiceId) {
       console.warn("[TTS] Missing VITE_ELEVENLABS_API_KEY or voice id; cannot play TTS");
-      try {
-        toast.error("TTS is ON but ElevenLabs key/voice id is missing in frontend .env");
-      } catch {
-      }
       ttsPlayingRef.current = false;
       return;
     }
@@ -1179,6 +1135,7 @@ const CaptionControls = ({
             if (!originalText) return;
 
             const isFinal = data?.is_final === true;
+            const stability = Number.isFinite(data?.stability) ? Number(data.stability) : 0;
             const speakerName = isLocalSpeaker
               ? "You"
               : String(data?.speaker_full_name || data?.speaker || "Speaker");
@@ -1189,14 +1146,11 @@ const CaptionControls = ({
             const seg = utteranceRef.current[segKey] || {
               idx: 0,
               pauseTimer: null,
-              softTimer: null,
-              hardTimer: null,
               lastOriginal: "",
               lastTranslated: "",
-              lastUpdateAtMs: 0,
-              wordCount: 0,
               spoken: false,
               rescheduleCount: 0,
+              stableTriggered: false,
             };
 
             const utteranceKey = `${segKey}::${seg.idx}`;
@@ -1215,11 +1169,12 @@ const CaptionControls = ({
               }
               if (seg.spoken) return;
               seg.spoken = true;
+              seg.stableTriggered = true;
               seg.rescheduleCount = 0;
               utteranceRef.current[segKey] = seg;
 
               try {
-                enqueueTtsRef.current?.(translated, peerGenderRef.current, { utteranceKey });
+                enqueueTtsRef.current?.(translated, peerMeta?.gender, { utteranceKey });
               } catch {
               }
 
@@ -1228,24 +1183,13 @@ const CaptionControls = ({
               seg.spoken = false;
               seg.lastOriginal = "";
               seg.lastTranslated = "";
-              seg.lastUpdateAtMs = 0;
-              seg.wordCount = 0;
               seg.rescheduleCount = 0;
+              seg.stableTriggered = false;
               utteranceRef.current[segKey] = seg;
             };
 
             try {
               if (seg.pauseTimer) clearTimeout(seg.pauseTimer);
-            } catch {
-            }
-
-            try {
-              if (seg.softTimer) clearTimeout(seg.softTimer);
-            } catch {
-            }
-
-            try {
-              if (seg.hardTimer) clearTimeout(seg.hardTimer);
             } catch {
             }
 
@@ -1268,11 +1212,6 @@ const CaptionControls = ({
             pushCaption(originalCaption);
 
             seg.lastOriginal = originalText;
-            seg.lastUpdateAtMs = Date.now();
-            seg.wordCount = String(originalText || "")
-              .trim()
-              .split(/\s+/)
-              .filter(Boolean).length;
 
             if (data?.translated_text) {
               const translatedCaption = {
@@ -1297,19 +1236,16 @@ const CaptionControls = ({
 
             // Speak only once per utterance (on final or pause), to avoid repeats and 429.
             if (!isLocalSpeaker && interpretationModeRef.current) {
+              const STABLE_THRESHOLD = 0.85;
+              const stableInterimReady = !isFinal && stability >= STABLE_THRESHOLD && !!seg.lastTranslated;
+
               if (isFinal) {
                 finalizeUtterance();
+              } else if (stableInterimReady && !seg.stableTriggered) {
+                // Option 1: finalize early on stable interim.
+                finalizeUtterance();
               } else {
-                // Hybrid segmentation:
-                // - Soft pause for low latency
-                // - Hard pause for explicit sentence boundary
-                // - Max words to avoid long buffering
-                if (seg.wordCount >= MAX_WORDS && String(seg.lastTranslated || "").trim()) {
-                  finalizeUtterance();
-                } else {
-                  seg.softTimer = setTimeout(finalizeUtterance, SOFT_PAUSE_MS);
-                  seg.hardTimer = setTimeout(finalizeUtterance, HARD_PAUSE_MS);
-                }
+                seg.pauseTimer = setTimeout(finalizeUtterance, 900);
                 utteranceRef.current[segKey] = seg;
               }
             }
@@ -1554,29 +1490,6 @@ const CaptionControls = ({
             onClick={() =>
               setInterpretationMode((v) => {
                 const next = !v;
-                if (next) {
-                  try {
-                    setShowCaptions(true);
-                  } catch {
-                  }
-                  try {
-                    const a = new Audio();
-                    a.muted = true;
-                    const p = a.play();
-                    if (p && typeof p.catch === "function") p.catch(() => {});
-                  } catch {
-                  }
-                  try {
-                    const hasKey = Boolean(String(ELEVENLABS_API_KEY || "").trim());
-                    const hasMale = Boolean(String(ELEVENLABS_MALE_VOICE_ID || "").trim());
-                    const hasFemale = Boolean(String(ELEVENLABS_FEMALE_VOICE_ID || "").trim());
-                    console.log("[TTS] ElevenLabs env present", { hasKey, hasMaleVoiceId: hasMale, hasFemaleVoiceId: hasFemale });
-                    if (!hasKey || (!hasMale && !hasFemale)) {
-                      toast.error("Missing ElevenLabs frontend env vars. Check VITE_ELEVENLABS_API_KEY and voice IDs.");
-                    }
-                  } catch {
-                  }
-                }
                 try {
                   console.log("[TTS] Interpretation Mode:", next ? "ON" : "OFF");
                 } catch {
@@ -1635,12 +1548,12 @@ const CaptionBar = ({
     }
 
     return (
-      <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
-        {items.slice(-12).map((c, index) => (
+      <div className="space-y-2 max-h-[220px] overflow-y-auto">
+        {items.slice(-6).map((c, index) => (
           <div
             key={c.id}
             className={`p-3 rounded-lg border bg-base-200/40 border-base-300/60 ${
-              index === items.slice(-12).length - 1 ? "ring-2 ring-primary/20" : ""
+              index === items.slice(-6).length - 1 ? "ring-2 ring-primary/20" : ""
             }`}
           >
             <div className="flex items-center justify-between">
@@ -1676,7 +1589,7 @@ const CaptionBar = ({
 
   return (
     <div className="w-full px-4 pb-2">
-      <div className="bg-base-100/90 backdrop-blur-md rounded-2xl border border-base-300 shadow-lg p-4 max-w-[1200px] mx-auto">
+      <div className="bg-base-100/90 backdrop-blur-md rounded-2xl border border-base-300 shadow-lg p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 bg-success rounded-full animate-pulse"></div>

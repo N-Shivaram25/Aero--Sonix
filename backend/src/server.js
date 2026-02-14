@@ -397,10 +397,12 @@ const setupGoogleCloudWsProxy = (server) => {
                 const result = data.results[0];
                 const originalText = result.alternatives[0]?.transcript || '';
                 const isFinal = result.isFinal;
+                const stability = typeof result.stability === 'number' ? result.stability : 0;
                 
                 if (originalText.trim()) {
                   console.log('[GoogleCloudProxy] Transcript:', originalText);
                   console.log('[GoogleCloudProxy] Is final:', isFinal);
+                  console.log('[GoogleCloudProxy] Stability:', stability);
 
                   const currentRoom = getRoom(callId);
                   if (!currentRoom) return;
@@ -415,11 +417,14 @@ const setupGoogleCloudWsProxy = (server) => {
                     const gateKey = `${myUserId}__${peer.userId}`;
                     const nowMs = Date.now();
                     const prevState = interimTranslationState.get(gateKey);
+
+                    const stableInterim = !isFinal && stability >= 0.85;
+                    const interimThrottleMs = stableInterim ? 800 : 2500;
                     const canTranslateInterim =
                       !isFinal &&
                       shouldTranslate &&
                       originalText.trim().length >= 6 &&
-                      (!prevState || nowMs - prevState.lastAtMs >= 2500 || prevState.lastText !== originalText);
+                      (!prevState || nowMs - prevState.lastAtMs >= interimThrottleMs || prevState.lastText !== originalText);
 
                     // Translate on final always; translate interim only with throttling.
                     if ((isFinal && shouldTranslate) || canTranslateInterim) {
@@ -445,6 +450,7 @@ const setupGoogleCloudWsProxy = (server) => {
                       translated_text: translatedText,
                       translated_language: translatedText ? peerTargetCode : null,
                       is_final: Boolean(isFinal),
+                      stability,
                       language_code: speakerLanguageCode,
                       speaker_profile_language: speakerLanguageCode,
                       speaker_profile_language_raw: speakerLanguageRaw,
@@ -494,53 +500,47 @@ const setupGoogleCloudWsProxy = (server) => {
     startRecognition();
 
     // Forward audio chunks from client to recognition stream
-    // IMPORTANT: ws delivers both binary audio frames and text control messages here.
-    // If we mistakenly write JSON bytes into recognizeStream, Google STT will stop producing transcripts.
-    clientWs.on("message", (data, isBinary) => {
+    clientWs.on("message", (chunk) => {
       if (closed) return;
-
+      
       try {
-        if (isBinary) {
+        // Handle binary audio data - write directly to stream
+        if (chunk instanceof Buffer) {
           if (recognizeStream && !recognizeStream.destroyed) {
-            const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
-            recognizeStream.write(buf);
+            recognizeStream.write(chunk);
           }
-          return;
         }
-
-        // Text/control messages
-        let message;
-        try {
-          const text = Buffer.isBuffer(data) ? data.toString("utf8") : String(data);
-          message = JSON.parse(text);
-        } catch {
-          return;
-        }
-
-        if (message?.type === "request_peers") {
-          // Send current room participants to the requesting client
-          const currentRoom = getRoom(callId);
-          if (currentRoom) {
-            for (const [, peer] of currentRoom.entries()) {
-              if (peer.userId !== myUserId) {
-                try {
-                  clientWs.send(
-                    JSON.stringify({
-                      type: "peer",
-                      userId: peer.userId,
-                      fullName: peer.fullName,
-                      nativeLanguage: peer.nativeLanguage,
-                    })
-                  );
-                } catch (error) {
-                  console.error("[GoogleCloudProxy] Error sending peer info:", error);
+        
+        // Handle text messages (like request_peers)
+        if (typeof chunk === 'string') {
+          try {
+            const message = JSON.parse(chunk);
+            if (message.type === 'request_peers') {
+              // Send current room participants to the requesting client
+              const currentRoom = getRoom(callId);
+              if (currentRoom) {
+                for (const [, peer] of currentRoom.entries()) {
+                  if (peer.userId !== myUserId) {
+                    try {
+                      clientWs.send(JSON.stringify({
+                        type: "peer",
+                        userId: peer.userId,
+                        fullName: peer.fullName,
+                        nativeLanguage: peer.nativeLanguage,
+                      }));
+                    } catch (error) {
+                      console.error('[GoogleCloudProxy] Error sending peer info:', error);
+                    }
+                  }
                 }
               }
             }
+          } catch (parseError) {
+            // Ignore JSON parse errors for binary data
           }
         }
       } catch (error) {
-        console.error("[GoogleCloudProxy] Error processing message:", error);
+        console.error('[GoogleCloudProxy] Error processing message:', error);
       }
     });
 
