@@ -397,6 +397,202 @@ const CaptionControls = ({
     lastTtsTextRef.current = "";
   }, []);
 
+  const streamElevenLabsTts = useCallback(
+    async ({ text, voiceId, apiKey }) => {
+      const mimeCandidates = ['audio/mpeg; codecs="mp3"', "audio/mpeg"];
+      const supportedMime = mimeCandidates.find((m) => {
+        try {
+          return typeof MediaSource !== "undefined" && MediaSource.isTypeSupported(m);
+        } catch {
+          return false;
+        }
+      });
+
+      if (typeof MediaSource === "undefined" || !supportedMime) {
+        throw new Error("MediaSource streaming not supported");
+      }
+
+      try {
+        if (ttsAbortRef.current) ttsAbortRef.current.abort();
+      } catch {
+      }
+      const ac = new AbortController();
+      ttsAbortRef.current = ac;
+
+      const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+      console.log("[TTS] Streaming start", { voiceId, text: String(text || "").slice(0, 300) });
+
+      const audio = new Audio();
+      audio.preload = "auto";
+      ttsAudioRef.current = audio;
+      ttsPlayingRef.current = true;
+
+      const mediaSource = new MediaSource();
+      const objectUrl = URL.createObjectURL(mediaSource);
+      audio.src = objectUrl;
+
+      const cleanup = () => {
+        try {
+          URL.revokeObjectURL(objectUrl);
+        } catch {
+        }
+        try {
+          if (ttsAudioRef.current === audio) ttsAudioRef.current = null;
+        } catch {
+        }
+        try {
+          ttsPlayingRef.current = false;
+        } catch {
+        }
+        try {
+          ttsAbortRef.current = null;
+        } catch {
+        }
+      };
+
+      const donePromise = new Promise((resolve, reject) => {
+        audio.onended = () => {
+          try {
+            console.log("[TTS] Play completed", { spokenText: String(text || "").slice(0, 600) });
+          } catch {
+          }
+          cleanup();
+          resolve();
+        };
+        audio.onerror = () => {
+          cleanup();
+          reject(new Error("Audio playback error"));
+        };
+      });
+
+      mediaSource.addEventListener(
+        "sourceopen",
+        async () => {
+          let sourceBuffer;
+          try {
+            sourceBuffer = mediaSource.addSourceBuffer(supportedMime);
+          } catch (e) {
+            try {
+              mediaSource.endOfStream();
+            } catch {
+            }
+            cleanup();
+            return;
+          }
+
+          const streamUrl = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`;
+          let response;
+          try {
+            response = await fetch(streamUrl, {
+              method: "POST",
+              headers: {
+                "xi-api-key": String(apiKey),
+                "Content-Type": "application/json",
+                Accept: "audio/mpeg",
+              },
+              signal: ac.signal,
+              body: JSON.stringify({
+                text,
+                model_id: "eleven_multilingual_v2",
+                voice_settings: {
+                  stability: 0.5,
+                  similarity_boost: 0.75,
+                },
+              }),
+            });
+          } catch (e) {
+            if (e?.name === "AbortError") return;
+            try {
+              mediaSource.endOfStream();
+            } catch {
+            }
+            cleanup();
+            return;
+          }
+
+          if (!response?.ok || !response.body) {
+            const errText = await response?.text?.().catch(() => "");
+            console.error("[TTS] ElevenLabs streaming HTTP error", {
+              status: response?.status,
+              body: errText,
+            });
+            try {
+              mediaSource.endOfStream();
+            } catch {
+            }
+            cleanup();
+            return;
+          }
+
+          let firstChunkLogged = false;
+          const reader = response.body.getReader();
+
+          const appendChunk = (chunk) =>
+            new Promise((resolve, reject) => {
+              const onEnd = () => {
+                sourceBuffer.removeEventListener("updateend", onEnd);
+                sourceBuffer.removeEventListener("error", onErr);
+                resolve();
+              };
+              const onErr = () => {
+                sourceBuffer.removeEventListener("updateend", onEnd);
+                sourceBuffer.removeEventListener("error", onErr);
+                reject(new Error("SourceBuffer error"));
+              };
+              sourceBuffer.addEventListener("updateend", onEnd);
+              sourceBuffer.addEventListener("error", onErr);
+              try {
+                sourceBuffer.appendBuffer(chunk);
+              } catch (e) {
+                sourceBuffer.removeEventListener("updateend", onEnd);
+                sourceBuffer.removeEventListener("error", onErr);
+                reject(e);
+              }
+            });
+
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (!firstChunkLogged) {
+                firstChunkLogged = true;
+                const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+                console.log("[TTS] Streaming first chunk", { ms: Math.round(now - startedAt) });
+                try {
+                  const p = audio.play();
+                  if (p && typeof p.catch === "function") p.catch(() => {});
+                } catch {
+                }
+              }
+              await appendChunk(value);
+            }
+            try {
+              mediaSource.endOfStream();
+            } catch {
+            }
+          } catch (e) {
+            if (e?.name === "AbortError") return;
+            try {
+              mediaSource.endOfStream();
+            } catch {
+            }
+          }
+        },
+        { once: true }
+      );
+
+      try {
+        // Kick off playback pipeline; actual audio starts on first appended data.
+        const p = audio.play();
+        if (p && typeof p.catch === "function") p.catch(() => {});
+      } catch {
+      }
+
+      return donePromise;
+    },
+    []
+  );
+
   const playNextTts = useCallback(() => {
     if (!interpretationModeRef.current) {
       stopTts();
@@ -504,6 +700,14 @@ const CaptionControls = ({
         voiceId,
         text: clean.slice(0, 600),
       });
+
+      // Prefer streaming playback to reduce latency.
+      try {
+        await streamElevenLabsTts({ text: clean, voiceId, apiKey: ELEVENLABS_API_KEY });
+        return;
+      } catch (e) {
+        console.warn("[TTS] Streaming unavailable; falling back to non-streaming", e?.message);
+      }
 
       try {
         if (ttsAbortRef.current) ttsAbortRef.current.abort();
