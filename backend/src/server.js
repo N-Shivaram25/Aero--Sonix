@@ -494,47 +494,53 @@ const setupGoogleCloudWsProxy = (server) => {
     startRecognition();
 
     // Forward audio chunks from client to recognition stream
-    clientWs.on("message", (chunk) => {
+    // IMPORTANT: ws delivers both binary audio frames and text control messages here.
+    // If we mistakenly write JSON bytes into recognizeStream, Google STT will stop producing transcripts.
+    clientWs.on("message", (data, isBinary) => {
       if (closed) return;
-      
+
       try {
-        // Handle binary audio data - write directly to stream
-        if (chunk instanceof Buffer) {
+        if (isBinary) {
           if (recognizeStream && !recognizeStream.destroyed) {
-            recognizeStream.write(chunk);
+            const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+            recognizeStream.write(buf);
           }
+          return;
         }
-        
-        // Handle text messages (like request_peers)
-        if (typeof chunk === 'string') {
-          try {
-            const message = JSON.parse(chunk);
-            if (message.type === 'request_peers') {
-              // Send current room participants to the requesting client
-              const currentRoom = getRoom(callId);
-              if (currentRoom) {
-                for (const [, peer] of currentRoom.entries()) {
-                  if (peer.userId !== myUserId) {
-                    try {
-                      clientWs.send(JSON.stringify({
-                        type: "peer",
-                        userId: peer.userId,
-                        fullName: peer.fullName,
-                        nativeLanguage: peer.nativeLanguage,
-                      }));
-                    } catch (error) {
-                      console.error('[GoogleCloudProxy] Error sending peer info:', error);
-                    }
-                  }
+
+        // Text/control messages
+        let message;
+        try {
+          const text = Buffer.isBuffer(data) ? data.toString("utf8") : String(data);
+          message = JSON.parse(text);
+        } catch {
+          return;
+        }
+
+        if (message?.type === "request_peers") {
+          // Send current room participants to the requesting client
+          const currentRoom = getRoom(callId);
+          if (currentRoom) {
+            for (const [, peer] of currentRoom.entries()) {
+              if (peer.userId !== myUserId) {
+                try {
+                  clientWs.send(
+                    JSON.stringify({
+                      type: "peer",
+                      userId: peer.userId,
+                      fullName: peer.fullName,
+                      nativeLanguage: peer.nativeLanguage,
+                    })
+                  );
+                } catch (error) {
+                  console.error("[GoogleCloudProxy] Error sending peer info:", error);
                 }
               }
             }
-          } catch (parseError) {
-            // Ignore JSON parse errors for binary data
           }
         }
       } catch (error) {
-        console.error('[GoogleCloudProxy] Error processing message:', error);
+        console.error("[GoogleCloudProxy] Error processing message:", error);
       }
     });
 
