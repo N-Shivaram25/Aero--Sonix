@@ -11,8 +11,8 @@ import {
 
 const getFallbackVoiceId = (gender) => {
   const g = String(gender || "").toLowerCase();
-  const male = process.env.MALE_VOICE_ID || "";
-  const female = process.env.FEMALE_VOICE_ID || "";
+  const male = process.env.ELEVENLABS_MALE_VOICE_ID || process.env.MALE_VOICE_ID || "";
+  const female = process.env.ELEVENLABS_FEMALE_VOICE_ID || process.env.FEMALE_VOICE_ID || "";
   if (g === "male") return male;
   if (g === "female") return female;
   return male || female;
@@ -247,6 +247,14 @@ export async function tts(req, res) {
       return res.status(500).json({ message: "No voice configured for TTS" });
     }
 
+    console.log("[TTS] ElevenLabs request", {
+      speakerUserId: String(speakerUserId || speaker?._id || ""),
+      speakerName: String(speaker?.fullName || ""),
+      gender: String(speaker?.gender || ""),
+      voiceId,
+      text: String(text || "").slice(0, 600),
+    });
+
     const elevenlabs = getElevenLabsClient();
     const audio = await elevenlabs.textToSpeech.convert(voiceId, {
       text,
@@ -260,7 +268,14 @@ export async function tts(req, res) {
     res.setHeader("Content-Type", "audio/mpeg");
     return res.status(200).send(buffer);
   } catch (error) {
-    console.error("Error in tts controller", error);
+    console.error("========== TTS ERROR ==========");
+    console.error("Message:", error?.message);
+    if (error?.response) {
+      console.error("Status:", error.response.status);
+      console.error("Data:", error.response.data);
+    }
+    console.error("Stack:", error?.stack);
+    console.error("================================");
 
     const rawMessage =
       error?.message ||
@@ -268,14 +283,6 @@ export async function tts(req, res) {
       error?.response?.data?.error ||
       "Internal Server Error";
     const message = String(rawMessage || "Internal Server Error");
-
-    // Surface common configuration issues explicitly
-    if (message.includes("ELEVENLABS_API_KEY")) {
-      return res.status(500).json({ message });
-    }
-    if (message.toLowerCase().includes("voice") && message.toLowerCase().includes("not")) {
-      return res.status(500).json({ message });
-    }
 
     return res.status(500).json({ message });
   }

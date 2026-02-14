@@ -400,12 +400,24 @@ const CaptionControls = ({
 
     audio.onended = () => {
       try {
+        console.log("[TTS] Play completed", {
+          spokenText: String(next?.text || "").slice(0, 600),
+        });
+      } catch {
+      }
+      try {
         URL.revokeObjectURL(next.url);
       } catch {
       }
       playNextTts();
     };
     audio.onerror = () => {
+      try {
+        console.error("[TTS] Audio playback error", {
+          spokenText: String(next?.text || "").slice(0, 600),
+        });
+      } catch {
+      }
       try {
         URL.revokeObjectURL(next.url);
       } catch {
@@ -435,13 +447,25 @@ const CaptionControls = ({
     lastTtsTextRef.current = clean;
 
     try {
+      console.log("[TTS] ON - ElevenLabs voice is using translated text", {
+        text: clean.slice(0, 600),
+      });
+    } catch {
+    }
+
+    try {
+      toast("ElevenLabs Voice is coming");
+    } catch {
+    }
+
+    try {
       const speakerUserId = String(authUserIdRef.current || "");
       const resp = await callTts({ text: clean, speakerUserId });
       const buf = resp?.data;
       if (!buf) return;
       const blob = new Blob([buf], { type: "audio/mpeg" });
       const url = URL.createObjectURL(blob);
-      ttsQueueRef.current.push({ url });
+      ttsQueueRef.current.push({ url, text: clean });
       if (!ttsPlayingRef.current) {
         playNextTts();
       }
@@ -1192,7 +1216,16 @@ const CaptionControls = ({
           <button
             type="button"
             className={`btn btn-xs ${interpretationMode ? "btn-primary" : "btn-outline"}`}
-            onClick={() => setInterpretationMode((v) => !v)}
+            onClick={() =>
+              setInterpretationMode((v) => {
+                const next = !v;
+                try {
+                  console.log("[TTS] Interpretation Mode:", next ? "ON" : "OFF");
+                } catch {
+                }
+                return next;
+              })
+            }
             title={interpretationMode ? "Disable voice interpretation" : "Enable voice interpretation"}
           >
             {interpretationMode ? "TTS On" : "TTS Off"}
