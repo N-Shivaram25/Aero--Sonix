@@ -368,8 +368,17 @@ const CaptionControls = ({
   const lastTtsTextRef = useRef("");
   const interpretationModeRef = useRef(false);
   const enqueueTtsRef = useRef(null);
+  const ttsAbortRef = useRef(null);
+  const pendingInterimTtsRef = useRef({ text: "", timer: null });
 
   const stopTts = useCallback(() => {
+    try {
+      if (ttsAbortRef.current) {
+        ttsAbortRef.current.abort();
+      }
+    } catch {
+    }
+    ttsAbortRef.current = null;
     try {
       const a = ttsAudioRef.current;
       if (a) {
@@ -442,10 +451,18 @@ const CaptionControls = ({
     }
   }, [stopTts]);
 
-  const enqueueTts = useCallback(async (text, gender) => {
+  const enqueueTts = useCallback(async (text, gender, { interrupt } = {}) => {
     if (!interpretationModeRef.current) return;
     const clean = String(text || "").trim();
     if (!clean) return;
+
+    if (interrupt) {
+      try {
+        console.log("[TTS] Interrupting previous playback for newer text");
+      } catch {
+      }
+      stopTts();
+    }
 
     // Prevent repeating the same phrase too often (common with interim updates).
     if (lastTtsTextRef.current === clean) return;
@@ -488,6 +505,13 @@ const CaptionControls = ({
         text: clean.slice(0, 600),
       });
 
+      try {
+        if (ttsAbortRef.current) ttsAbortRef.current.abort();
+      } catch {
+      }
+      const ac = new AbortController();
+      ttsAbortRef.current = ac;
+
       const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
         method: "POST",
         headers: {
@@ -495,6 +519,7 @@ const CaptionControls = ({
           "Content-Type": "application/json",
           Accept: "audio/mpeg",
         },
+        signal: ac.signal,
         body: JSON.stringify({
           text: clean,
           model_id: "eleven_multilingual_v2",
@@ -514,10 +539,15 @@ const CaptionControls = ({
       const audioBlob = await response.blob();
       const url = URL.createObjectURL(audioBlob);
       ttsQueueRef.current.push({ url, text: clean });
+      ttsAbortRef.current = null;
       if (!ttsPlayingRef.current) {
         playNextTts();
       }
     } catch (error) {
+      if (error?.name === "AbortError") {
+        console.log("[TTS] Request aborted (newer text arrived)");
+        return;
+      }
       const status = error?.response?.status;
       const data = error?.response?.data;
       let decodedData = data;
@@ -1035,11 +1065,50 @@ const CaptionControls = ({
               pushCaption(translatedCaption);
             }
 
-            // TTS only for final translated segments from remote speakers.
-            if (!isLocalSpeaker && isFinal && data?.translated_text && interpretationModeRef.current) {
-              try {
-                enqueueTtsRef.current?.(String(data.translated_text || ""), peerMeta?.gender);
-              } catch {
+            // Low-latency TTS for remote speakers.
+            // - Final transcripts: speak immediately (interrupt).
+            // - Interim transcripts: debounce and speak most recent translation (interrupt).
+            if (!isLocalSpeaker && data?.translated_text && interpretationModeRef.current) {
+              const nextText = String(data.translated_text || "").trim();
+              if (nextText) {
+                if (isFinal) {
+                  try {
+                    if (pendingInterimTtsRef.current.timer) {
+                      clearTimeout(pendingInterimTtsRef.current.timer);
+                    }
+                  } catch {
+                  }
+                  pendingInterimTtsRef.current = { text: "", timer: null };
+                  try {
+                    enqueueTtsRef.current?.(nextText, peerMeta?.gender, { interrupt: true });
+                  } catch {
+                  }
+                } else {
+                  const prevPending = String(pendingInterimTtsRef.current.text || "");
+                  pendingInterimTtsRef.current.text = nextText;
+                  try {
+                    if (pendingInterimTtsRef.current.timer) {
+                      clearTimeout(pendingInterimTtsRef.current.timer);
+                    }
+                  } catch {
+                  }
+                  // Avoid firing too early on very short fragments.
+                  const delayMs = nextText.length < 10 ? 450 : 250;
+                  pendingInterimTtsRef.current.timer = setTimeout(() => {
+                    try {
+                      const t = String(pendingInterimTtsRef.current.text || "").trim();
+                      pendingInterimTtsRef.current = { text: "", timer: null };
+                      if (!t) return;
+                      enqueueTtsRef.current?.(t, peerMeta?.gender, { interrupt: true });
+                    } catch {
+                    }
+                  }, delayMs);
+
+                  // If translation is not changing (duplicate interim), don't keep rescheduling forever.
+                  if (prevPending && prevPending === nextText) {
+                    // keep current schedule
+                  }
+                }
               }
             }
           };
@@ -1175,6 +1244,11 @@ const CaptionControls = ({
 
     return () => {
       stopped = true;
+
+      try {
+        if (pendingInterimTtsRef.current.timer) clearTimeout(pendingInterimTtsRef.current.timer);
+      } catch {
+      }
 
       try {
         if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
