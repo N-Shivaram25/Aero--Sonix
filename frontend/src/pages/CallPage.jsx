@@ -448,8 +448,30 @@ const CaptionControls = ({
     } catch (error) {
       const status = error?.response?.status;
       const data = error?.response?.data;
-      const message = data?.message || error?.message || "TTS request failed";
-      console.error("[TTS] /call/tts failed", { status, message, data });
+      let decodedData = data;
+      let decodedMessage = "";
+
+      try {
+        if (data && (data instanceof ArrayBuffer || ArrayBuffer.isView(data))) {
+          const ab = data instanceof ArrayBuffer ? data : data.buffer;
+          const text = new TextDecoder("utf-8").decode(new Uint8Array(ab));
+          decodedMessage = text;
+          try {
+            decodedData = JSON.parse(text);
+          } catch {
+            decodedData = text;
+          }
+        }
+      } catch {
+      }
+
+      const message =
+        decodedData?.message ||
+        decodedMessage ||
+        data?.message ||
+        error?.message ||
+        "TTS request failed";
+      console.error("[TTS] /call/tts failed", { status, message, data: decodedData });
     }
   }, [playNextTts]);
 
