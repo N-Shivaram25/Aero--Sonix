@@ -368,6 +368,7 @@ const CaptionControls = ({
   const trackRef = useRef(null);
   const trackHandlersRef = useRef(null);
   const micMuteStateRef = useRef({ muted: null, lastRestartAtMs: 0 });
+  const lastWsRecoverAtMsRef = useRef(0);
   const interimRef = useRef("");
   const silenceTimerRef = useRef(null);
 
@@ -1110,6 +1111,19 @@ const CaptionControls = ({
                 fatalWsError = true;
               } else if (msg.includes('Recognition error')) {
                 toast.error("Speech recognition error");
+
+                // Auto-recover for Google stream duration limit.
+                if (msg.includes("Exceeded maximum allowed stream duration")) {
+                  const now = Date.now();
+                  if (now - lastWsRecoverAtMsRef.current >= 5000) {
+                    lastWsRecoverAtMsRef.current = now;
+                    console.warn("[Captions] Recovering from stream duration limit; restarting captions pipeline");
+                    try {
+                      setRestartSeq((v) => v + 1);
+                    } catch {
+                    }
+                  }
+                }
               } else {
                 toast.error(`Captions error: ${msg}`);
               }

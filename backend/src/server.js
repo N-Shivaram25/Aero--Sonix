@@ -344,11 +344,18 @@ const setupGoogleCloudWsProxy = (server) => {
     let recognizeStream = null;
     let closed = false;
     const interimTranslationState = new Map();
+    let rotateTimer = null;
+    let restarting = false;
     
     const cleanup = (reason) => {
       if (closed) return;
       closed = true;
       console.log("[GoogleCloudProxy] cleanup", reason || "(no reason)");
+      try {
+        if (rotateTimer) clearTimeout(rotateTimer);
+      } catch {
+      }
+      rotateTimer = null;
       try {
         if (recognizeStream) {
           recognizeStream.destroy();
@@ -359,6 +366,31 @@ const setupGoogleCloudWsProxy = (server) => {
         clientWs.close(1011, reason || "Google Cloud connection closed");
       } catch {
       }
+    };
+
+    const restartRecognition = (reason) => {
+      if (closed || restarting) return;
+      restarting = true;
+      console.log("[GoogleCloudProxy] Restarting recognition stream", reason || "(no reason)");
+
+      try {
+        if (rotateTimer) clearTimeout(rotateTimer);
+      } catch {
+      }
+      rotateTimer = null;
+
+      try {
+        if (recognizeStream && !recognizeStream.destroyed) {
+          recognizeStream.destroy();
+        }
+      } catch {
+      }
+      recognizeStream = null;
+
+      setTimeout(() => {
+        restarting = false;
+        if (!closed) startRecognition();
+      }, 300);
     };
 
     const startRecognition = () => {
@@ -381,11 +413,12 @@ const setupGoogleCloudWsProxy = (server) => {
             } catch {
             }
             // Properly destroy stream to prevent further writes
-            if (recognizeStream && !recognizeStream.destroyed) {
-              recognizeStream.destroy();
+            const msg = String(error?.message || "");
+            if (msg.includes("Exceeded maximum allowed stream duration")) {
+              restartRecognition("duration_limit");
+              return;
             }
-            // Restart recognition on error
-            setTimeout(startRecognition, 2000);
+            restartRecognition("error");
           })
           .on('data', async (data) => {
             if (closed) return;
@@ -475,13 +508,21 @@ const setupGoogleCloudWsProxy = (server) => {
           .on('end', () => {
             console.log('[GoogleCloudProxy] Recognition stream ended');
             if (!closed) {
-              // Restart recognition stream
-              setTimeout(startRecognition, 1000);
+              restartRecognition("end");
             }
           })
           .on('close', () => {
             console.log('[GoogleCloudProxy] Recognition stream closed');
           });
+
+        // Proactively rotate the recognition stream before Google hard limit (~305s).
+        try {
+          if (rotateTimer) clearTimeout(rotateTimer);
+        } catch {
+        }
+        rotateTimer = setTimeout(() => {
+          restartRecognition("proactive_rotate");
+        }, 290 * 1000);
 
       } catch (error) {
         console.error('[GoogleCloudProxy] Error starting recognition:', error);
@@ -491,7 +532,7 @@ const setupGoogleCloudWsProxy = (server) => {
         }
         // Retry after delay
         if (!closed) {
-          setTimeout(startRecognition, 2000);
+          setTimeout(() => restartRecognition("start_failed"), 2000);
         }
       }
     };
