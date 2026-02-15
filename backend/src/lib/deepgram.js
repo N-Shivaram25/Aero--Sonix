@@ -36,15 +36,18 @@ export const createDeepgramConnection = ({ language }) => {
     "multi",
   ]);
 
-  const preferredModel = NOVA2_LANGS.has(lang) ? "nova-2" : "whisper-large";
+  // Deepgram's /v1/listen is streaming-only. Whisper models are REST-only and will
+  // return 405 (Method Not Allowed) if used here. Use a streaming-capable fallback.
+  const preferredModel = NOVA2_LANGS.has(lang) ? "nova-2" : "nova-2-general";
 
   const url = new URL("wss://api.deepgram.com/v1/listen");
   url.searchParams.set("model", preferredModel);
-  // For whisper models, Deepgram can auto-detect; passing an unsupported language can break.
+  // When using the general model, prefer auto-detect to avoid handshake failures
+  // on strict language constraints.
   if (preferredModel === "nova-2") {
     url.searchParams.set("language", lang);
-  } else if (lang !== "multi") {
-    url.searchParams.set("language", lang);
+  } else {
+    url.searchParams.set("language", "multi");
   }
   url.searchParams.set("interim_results", "true");
   url.searchParams.set("smart_format", "true");
