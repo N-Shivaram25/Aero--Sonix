@@ -344,7 +344,16 @@ const setupGoogleCloudWsProxy = (server) => {
       closed = true;
       console.log("[DeepgramProxy] cleanup", reason || "(no reason)");
       try {
-        if (dg?.connection) dg.connection.finish();
+        if (dg?.connection) {
+          try {
+            dg.connection.close();
+          } catch {
+          }
+          try {
+            dg.connection.terminate?.();
+          } catch {
+          }
+        }
       } catch {
       }
       try {
@@ -372,9 +381,22 @@ const setupGoogleCloudWsProxy = (server) => {
       console.log("[DeepgramProxy] Deepgram connection opened");
     });
 
-    dgConn.on(Events.Transcript, (data) => {
+    dgConn.on(Events.Transcript, (raw) => {
       if (closed) return;
       try {
+        const text = Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw || "");
+        if (!text) return;
+
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          return;
+        }
+
+        // We only care about Results messages.
+        if (String(data?.type || "") !== "Results") return;
+
         const alt = data?.channel?.alternatives?.[0];
         const originalText = String(alt?.transcript || "");
         if (!originalText.trim()) return;
@@ -446,8 +468,14 @@ const setupGoogleCloudWsProxy = (server) => {
       }
     });
 
-    dgConn.on(Events.Close, () => {
-      console.log("[DeepgramProxy] Deepgram connection closed");
+    dgConn.on(Events.Close, (code, reason) => {
+      let reasonText = "";
+      try {
+        reasonText = Buffer.isBuffer(reason) ? reason.toString("utf8") : String(reason || "");
+      } catch {
+        reasonText = "";
+      }
+      console.log("[DeepgramProxy] Deepgram connection closed", { code, reason: reasonText });
     });
 
     // Forward audio chunks from client to recognition stream
@@ -458,8 +486,7 @@ const setupGoogleCloudWsProxy = (server) => {
         // Handle binary audio data - write directly to stream
         if (chunk instanceof Buffer) {
           try {
-            const readyState = typeof dgConn?.getReadyState === "function" ? dgConn.getReadyState() : null;
-            if (readyState === 1) {
+            if (dgConn?.readyState === WebSocket.OPEN) {
               dgConn.send(chunk);
             }
           } catch {
