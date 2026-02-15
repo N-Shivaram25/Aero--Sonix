@@ -1463,14 +1463,23 @@ const CaptionControls = ({
       }
 
       try {
-        audioCtxRef.current?.close?.();
+        const ctx = audioCtxRef.current;
+        if (ctx && ctx.state !== "closed" && typeof ctx.close === "function") {
+          const p = ctx.close();
+          if (p && typeof p.catch === "function") p.catch(() => {});
+        }
       } catch {
       }
+
+      audioCtxRef.current = null;
+      processorRef.current = null;
 
       try {
         socketRef.current?.close?.();
       } catch {
       }
+
+      socketRef.current = null;
 
       try {
         trackHandlersRef.current?.cleanup?.();

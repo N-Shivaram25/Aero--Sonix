@@ -10,9 +10,42 @@ export const createDeepgramConnection = ({ language }) => {
   const key = requireDeepgramKey();
   const lang = String(language || "").trim() || "multi";
 
+  // Deepgram models have language availability constraints. Some languages (e.g. Telugu)
+  // may not be supported by nova-2 and will cause a 400 during WS handshake.
+  // We pick a safer fallback model for those cases.
+  const NOVA2_LANGS = new Set([
+    "en",
+    "hi",
+    "es",
+    "fr",
+    "de",
+    "pt",
+    "it",
+    "nl",
+    "sv",
+    "pl",
+    "ru",
+    "ja",
+    "ko",
+    "zh",
+    "ar",
+    "tr",
+    "vi",
+    "el",
+    "he",
+    "multi",
+  ]);
+
+  const preferredModel = NOVA2_LANGS.has(lang) ? "nova-2" : "whisper-large";
+
   const url = new URL("wss://api.deepgram.com/v1/listen");
-  url.searchParams.set("model", "nova-2");
-  url.searchParams.set("language", lang);
+  url.searchParams.set("model", preferredModel);
+  // For whisper models, Deepgram can auto-detect; passing an unsupported language can break.
+  if (preferredModel === "nova-2") {
+    url.searchParams.set("language", lang);
+  } else if (lang !== "multi") {
+    url.searchParams.set("language", lang);
+  }
   url.searchParams.set("interim_results", "true");
   url.searchParams.set("smart_format", "true");
   url.searchParams.set("punctuate", "true");
@@ -20,6 +53,11 @@ export const createDeepgramConnection = ({ language }) => {
   url.searchParams.set("encoding", "linear16");
   url.searchParams.set("sample_rate", "16000");
   url.searchParams.set("channels", "1");
+
+  try {
+    console.log("[Deepgram] listen url", url.toString());
+  } catch {
+  }
 
   const connection = new WebSocket(url.toString(), {
     headers: {
