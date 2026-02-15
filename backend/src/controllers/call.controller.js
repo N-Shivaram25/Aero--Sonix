@@ -5,7 +5,6 @@ import { toFile } from "openai/uploads";
 import {
   toDeepgramLanguageCode,
   toElevenLabsLanguageCode,
-  toGoogleSttLanguageCode,
   toWhisperLanguageCode,
 } from "../lib/languageCodes.js";
 
@@ -91,60 +90,6 @@ export async function deepgramStt(req, res) {
     return res.status(200).json({ success: true, text: String(text || "").trim() });
   } catch (error) {
     console.error("Error in deepgramStt controller", error);
-    return res.status(500).json({ message: "Internal Server Error" });
-  }
-}
-
-export async function googleStt(req, res) {
-  try {
-    const file = req.file;
-    if (!file?.buffer) {
-      return res.status(400).json({ message: "Audio file is required" });
-    }
-
-    const apiKey = process.env.GOOGLE_CLOUD_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ message: "GOOGLE_CLOUD_API_KEY is not set" });
-    }
-
-    const languageCode = toGoogleSttLanguageCode(req.body?.language) || "en-US";
-
-    const mimetype = String(file.mimetype || "").toLowerCase();
-    let encoding = "ENCODING_UNSPECIFIED";
-    if (mimetype.includes("ogg")) encoding = "OGG_OPUS";
-    else if (mimetype.includes("webm")) encoding = "WEBM_OPUS";
-
-    const content = Buffer.from(file.buffer).toString("base64");
-
-    const url = `https://speech.googleapis.com/v1/speech:recognize?key=${encodeURIComponent(apiKey)}`;
-
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        config: {
-          languageCode,
-          encoding,
-          enableAutomaticPunctuation: true,
-          model: "latest_long",
-        },
-        audio: { content },
-      }),
-    });
-
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      const msg = data?.error?.message || "Google STT request failed";
-      return res.status(500).json({ message: msg });
-    }
-
-    const results = Array.isArray(data?.results) ? data.results : [];
-    const best = results?.[0]?.alternatives?.[0]?.transcript || "";
-    const text = String(best || "").trim();
-
-    return res.status(200).json({ success: true, text });
-  } catch (error) {
-    console.error("Error in googleStt controller", error);
     return res.status(500).json({ message: "Internal Server Error" });
   }
 }

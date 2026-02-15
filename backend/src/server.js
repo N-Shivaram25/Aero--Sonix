@@ -15,7 +15,6 @@ import adminRoutes from "./routes/admin.route.js";
 import profileRoutes from "./routes/profile.route.js";
 import callRoutes from "./routes/call.route.js";
 import aiRobotRoutes from "./routes/aiRobot.route.js";
-import googleRoutes from "./routes/google.route.js";
 
 import { connectDB } from "./lib/db.js";
 import User from "./models/User.js";
@@ -89,7 +88,6 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/call", callRoutes);
 app.use("/api/ai-robot", aiRobotRoutes);
-app.use("/api/google", googleRoutes);
 
 // Also expose non-prefixed routes (useful when frontend points directly at backend base URL)
 app.use("/auth", authRoutes);
@@ -99,7 +97,6 @@ app.use("/admin", adminRoutes);
 app.use("/profile", profileRoutes);
 app.use("/call", callRoutes);
 app.use("/ai-robot", aiRobotRoutes);
-app.use("/google", googleRoutes);
 
 // Simple public health endpoint for readiness checks
 app.get("/api/health", (req, res) => {
@@ -178,7 +175,7 @@ const setupGoogleCloudWsProxy = (server) => {
       const url = new URL(req.url, `http://${req.headers.host}`);
       console.log('[WebSocket] Upgrade request for:', url.pathname);
       
-      if (url.pathname !== "/ws/google-cloud") {
+      if (url.pathname !== "/ws/deepgram") {
         console.log('[WebSocket] Not handling path:', url.pathname);
         return;
       }
@@ -210,7 +207,7 @@ const setupGoogleCloudWsProxy = (server) => {
   });
 
   wss.on("connection", async (clientWs) => {
-    console.log("[GoogleCloudProxy] Client connected");
+    console.log("[DeepgramProxy] Client connected");
     
     // Set up ping/pong to keep connection alive
     clientWs.isAlive = true;
@@ -237,13 +234,13 @@ const setupGoogleCloudWsProxy = (server) => {
     
     const speakerLanguageCode = toDeepgramLanguageCode(speakerLanguageRaw) || 'en';
     
-    console.log("[GoogleCloudProxy] Speaker profile language:", speakerLanguageRaw, "->", speakerLanguageCode);
+    console.log("[DeepgramProxy] Speaker profile language:", speakerLanguageRaw, "->", speakerLanguageCode);
     
     const url = clientWs.gladiaUrl;
     const callId = String(url?.searchParams?.get("callId") || url?.searchParams?.get("call_id") || "").trim();
     
     if (!callId) {
-      console.error("[GoogleCloudProxy] Missing callId in WebSocket URL");
+      console.error("[DeepgramProxy] Missing callId in WebSocket URL");
       try {
         clientWs.send(JSON.stringify({ type: "error", message: "Missing callId" }));
       } catch {
@@ -254,7 +251,7 @@ const setupGoogleCloudWsProxy = (server) => {
     
     const room = getRoom(callId);
     if (!room) {
-      console.error("[GoogleCloudProxy] Could not create room for callId:", callId);
+      console.error("[DeepgramProxy] Could not create room for callId:", callId);
       try {
         clientWs.send(JSON.stringify({ type: "error", message: "Could not create room" }));
       } catch {
@@ -271,7 +268,7 @@ const setupGoogleCloudWsProxy = (server) => {
     const myUserId = String(speaker?._id || speaker?.id || "");
     const myUserName = String(speaker?.fullName || "");
 
-    console.log("[GoogleCloudProxy] User joined room:", {
+    console.log("[DeepgramProxy] User joined room:", {
       callId,
       userId: myUserId,
       userName: myUserName,
@@ -302,13 +299,13 @@ const setupGoogleCloudWsProxy = (server) => {
           })
         );
         
-        console.log('[GoogleCloudProxy] Notified peer about new user:', {
+        console.log('[DeepgramProxy] Notified peer about new user:', {
           from: myUserName,
           to: peer.fullName,
           language: speakerLanguageRaw
         });
       } catch (error) {
-        console.error("[GoogleCloudProxy] Error in peer notification:", error);
+        console.error("[DeepgramProxy] Error in peer notification:", error);
       }
     }
 
@@ -321,7 +318,7 @@ const setupGoogleCloudWsProxy = (server) => {
       ws: clientWs,
     });
 
-    console.log("[GoogleCloudProxy] Room participants:", room.size);
+    console.log("[DeepgramProxy] Room participants:", room.size);
 
     try {
       clientWs.send(
@@ -335,7 +332,7 @@ const setupGoogleCloudWsProxy = (server) => {
         })
       );
     } catch (error) {
-      console.error("[GoogleCloudProxy] Error sending meta info:", error);
+      console.error("[DeepgramProxy] Error sending meta info:", error);
     }
 
     // Deepgram STT (streaming)
@@ -345,13 +342,13 @@ const setupGoogleCloudWsProxy = (server) => {
     const cleanup = (reason) => {
       if (closed) return;
       closed = true;
-      console.log("[GoogleCloudProxy] cleanup", reason || "(no reason)");
+      console.log("[DeepgramProxy] cleanup", reason || "(no reason)");
       try {
         if (dg?.connection) dg.connection.finish();
       } catch {
       }
       try {
-        clientWs.close(1011, reason || "Google Cloud connection closed");
+        clientWs.close(1011, reason || "Deepgram connection closed");
       } catch {
       }
     };
@@ -469,7 +466,7 @@ const setupGoogleCloudWsProxy = (server) => {
                         nativeLanguage: peer.nativeLanguage,
                       }));
                     } catch (error) {
-                      console.error('[GoogleCloudProxy] Error sending peer info:', error);
+                      console.error('[DeepgramProxy] Error sending peer info:', error);
                     }
                   }
                 }
@@ -480,7 +477,7 @@ const setupGoogleCloudWsProxy = (server) => {
           }
         }
       } catch (error) {
-        console.error('[GoogleCloudProxy] Error processing message:', error);
+        console.error('[DeepgramProxy] Error processing message:', error);
       }
     });
 
@@ -493,7 +490,7 @@ const setupGoogleCloudWsProxy = (server) => {
     });
 
     clientWs.on("error", (err) => {
-      console.log("[GoogleCloudProxy] Client socket error", err?.message || err);
+      console.log("[DeepgramProxy] Client socket error", err?.message || err);
       try {
         removeFromRoom(callId, myUserId);
       } catch {

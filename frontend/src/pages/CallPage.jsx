@@ -903,7 +903,7 @@ const CaptionControls = ({
       ? origin.replace(/^https:\/\//, "wss://")
       : origin.replace(/^http:\/\//, "ws://");
 
-    const wsUrl = `${wsOrigin}/ws/google-cloud?token=${encodeURIComponent(token)}&callId=${encodeURIComponent(callId || "")}`;
+    const wsUrl = `${wsOrigin}/ws/deepgram?token=${encodeURIComponent(token)}&callId=${encodeURIComponent(callId || "")}`;
 
     let stopped = false;
 
@@ -1021,7 +1021,7 @@ const CaptionControls = ({
           socketRef.current = newWs;
           
           newWs.onopen = () => {
-            console.log("[Captions] Google Cloud WS open");
+            console.log("[Captions] Deepgram WS open");
             reconnectAttempts = 0; // Reset on successful connection
             toast.success("Live captions connected");
             
@@ -1034,7 +1034,7 @@ const CaptionControls = ({
           };
 
           newWs.onclose = (e) => {
-            console.log("[Captions] Google Cloud WS close", e?.code, e?.reason);
+            console.warn("[Captions] Deepgram WS closed", { code: e.code, reason: e.reason });
             
             // Show appropriate messages based on close code
             if (e?.code === 1000) {
@@ -1055,7 +1055,7 @@ const CaptionControls = ({
           };
 
           newWs.onerror = (e) => {
-            console.error("[Captions] Google Cloud WS error", e);
+            console.error("[Captions] Deepgram WS error", e);
             if (reconnectAttempts === 0) { // Only show toast on first error
               toast.error("Failed to connect to live captions");
             }
@@ -1072,7 +1072,7 @@ const CaptionControls = ({
               return;
             }
 
-            console.log("[Captions] Received Google Cloud WS message:", JSON.stringify(data, null, 2));
+            console.log("[Captions] Received Deepgram WS message:", JSON.stringify(data, null, 2));
 
             if (data?.type === "meta") {
               try {
@@ -1100,33 +1100,10 @@ const CaptionControls = ({
 
             if (data?.type === "error") {
               const msg = String(data?.message || "");
-              console.error('[Captions] Google Cloud error received:', msg);
+              console.error('[Captions] STT error received:', msg);
               
               // Handle specific error types
-              if (msg.includes('GOOGLE_CLOUD_API_KEY')) {
-                toast.error("Google Cloud API key not configured");
-                fatalWsError = true;
-              } else if (msg.includes('quota') || msg.includes('limit')) {
-                toast.error("Google Cloud quota exceeded");
-                fatalWsError = true;
-              } else if (msg.includes('Recognition error')) {
-                toast.error("Speech recognition error");
-
-                // Auto-recover for Google stream duration limit.
-                if (msg.includes("Exceeded maximum allowed stream duration")) {
-                  const now = Date.now();
-                  if (now - lastWsRecoverAtMsRef.current >= 5000) {
-                    lastWsRecoverAtMsRef.current = now;
-                    console.warn("[Captions] Recovering from stream duration limit; restarting captions pipeline");
-                    try {
-                      setRestartSeq((v) => v + 1);
-                    } catch {
-                    }
-                  }
-                }
-              } else {
-                toast.error(`Captions error: ${msg}`);
-              }
+              toast.error(msg ? `Captions error: ${msg}` : "Captions error");
               
               if (fatalWsError) {
                 try {
@@ -1312,14 +1289,15 @@ const CaptionControls = ({
             if (event.data.type === 'audio-data') {
               const inputBuffer = event.data.buffer;
               
-              // Check if input has actual audio data (not all zeros)
-              let hasAudio = false;
-              for (let i = 0; i < Math.min(100, inputBuffer.length); i++) {
-                if (Math.abs(inputBuffer[i]) > 0.001) {
-                  hasAudio = true;
-                  break;
-                }
+              // Compute RMS for better diagnostics.
+              let sumSq = 0;
+              const sampleN = Math.min(512, inputBuffer.length);
+              for (let i = 0; i < sampleN; i++) {
+                const v = inputBuffer[i];
+                sumSq += v * v;
               }
+              const rms = sampleN ? Math.sqrt(sumSq / sampleN) : 0;
+              const hasAudio = rms >= 0.002;
               
               // Always send audio data to keep connection alive
               const down = downsampleBuffer(inputBuffer, audioCtx.sampleRate, 16000);
@@ -1331,7 +1309,7 @@ const CaptionControls = ({
                 
                 // Log every 50 chunks (approximately every 2 seconds)
                 if (audioChunkCount % 50 === 0) {
-                  console.log("[Captions] Sent audio chunk #" + audioChunkCount + ", size: " + pcm16.byteLength + ", hasAudio: " + hasAudio + ", type: " + pcm16.constructor.name);
+                  console.log("[Captions] Sent audio chunk #" + audioChunkCount + ", size: " + pcm16.byteLength + ", rms: " + rms.toFixed(4) + ", hasAudio: " + hasAudio + ", type: " + pcm16.constructor.name);
                 }
               } catch (error) {
                 console.error("[Captions] Error sending audio:", error);
@@ -1361,14 +1339,15 @@ const CaptionControls = ({
 
             const input = e.inputBuffer.getChannelData(0);
             
-            // Check if input has actual audio data (not all zeros)
-            let hasAudio = false;
-            for (let i = 0; i < Math.min(100, input.length); i++) {
-              if (Math.abs(input[i]) > 0.001) {
-                hasAudio = true;
-                break;
-              }
+            // Compute RMS for better diagnostics.
+            let sumSq = 0;
+            const sampleN = Math.min(512, input.length);
+            for (let i = 0; i < sampleN; i++) {
+              const v = input[i];
+              sumSq += v * v;
             }
+            const rms = sampleN ? Math.sqrt(sumSq / sampleN) : 0;
+            const hasAudio = rms >= 0.002;
             
             // Always send audio data to keep connection alive
             const down = downsampleBuffer(input, audioCtx.sampleRate, 16000);
@@ -1380,7 +1359,7 @@ const CaptionControls = ({
               
               // Log every 50 chunks (approximately every 2 seconds)
               if (audioChunkCount % 50 === 0) {
-                console.log("[Captions] Sent audio chunk #" + audioChunkCount + ", size: " + pcm16.byteLength + ", hasAudio: " + hasAudio + ", type: " + pcm16.constructor.name);
+                console.log("[Captions] Sent audio chunk #" + audioChunkCount + ", size: " + pcm16.byteLength + ", rms: " + rms.toFixed(4) + ", hasAudio: " + hasAudio + ", type: " + pcm16.constructor.name);
               }
             } catch (error) {
               console.error("[Captions] Error sending audio:", error);
