@@ -421,9 +421,27 @@ const setupGoogleCloudWsProxy = (server) => {
     });
 
     dgConn.on(Events.Error, (err) => {
-      console.error("[DeepgramProxy] Deepgram error:", err);
+      const msg =
+        String(err?.message || "").trim() ||
+        String(err?.error?.message || "").trim() ||
+        String(err?.error || "").trim() ||
+        "Deepgram error";
       try {
-        clientWs.send(JSON.stringify({ type: "error", message: err?.message || "Deepgram error" }));
+        console.error("[DeepgramProxy] Deepgram error:", {
+          message: msg,
+          name: err?.name,
+          type: err?.type,
+          code: err?.code,
+        });
+      } catch {
+        console.error("[DeepgramProxy] Deepgram error:", err);
+      }
+      try {
+        if (err?.error?.stack) console.error("[DeepgramProxy] Deepgram error stack:", err.error.stack);
+      } catch {
+      }
+      try {
+        clientWs.send(JSON.stringify({ type: "error", message: msg }));
       } catch {
       }
     });

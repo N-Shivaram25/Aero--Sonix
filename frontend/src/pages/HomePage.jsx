@@ -8,7 +8,6 @@ import {
   acceptFriendRequest,
   sendFriendRequest,
   cancelFriendRequest,
-  getSupportedTranslationLanguages,
   updateProfile,
 } from "../lib/api";
 import { Link } from "react-router";
@@ -51,14 +50,7 @@ const HomePage = () => {
     queryFn: getOutgoingFriendReqs,
   });
 
-  const { data: supportedLanguagesRes, isLoading: loadingSupportedLanguages } = useQuery({
-    queryKey: ["supportedTranslationLanguages", "en"],
-    queryFn: () => getSupportedTranslationLanguages({ target: "en" }),
-  });
-
-  const supportedLanguages = Array.isArray(supportedLanguagesRes?.languages)
-    ? supportedLanguagesRes.languages
-    : [];
+  const supportedLanguages = [];
 
   const { mutate: saveLanguageMutation, isPending: savingLanguage } = useMutation({
     mutationFn: (nativeLanguage) => updateProfile({ nativeLanguage }),

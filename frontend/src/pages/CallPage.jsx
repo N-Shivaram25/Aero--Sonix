@@ -369,6 +369,8 @@ const CaptionControls = ({
   const trackHandlersRef = useRef(null);
   const micMuteStateRef = useRef({ muted: null, lastRestartAtMs: 0 });
   const lastWsRecoverAtMsRef = useRef(0);
+  const forceGumForSttRef = useRef(false);
+  const lastSttAudioRecoveryAtMsRef = useRef(0);
   const interimRef = useRef("");
   const silenceTimerRef = useRef(null);
 
@@ -954,7 +956,7 @@ const CaptionControls = ({
           
         console.log("[Captions] Stream audio track:", !!publishedAudio, "Track usable:", isUsableTrack, "Track state:", maybeMediaStreamTrack?.readyState);
 
-        if (isUsableTrack) {
+        if (isUsableTrack && !forceGumForSttRef.current) {
           trackRef.current = maybeMediaStreamTrack;
           try {
             if (trackHandlersRef.current?.track === maybeMediaStreamTrack) {
@@ -999,6 +1001,9 @@ const CaptionControls = ({
           stream = new MediaStream([maybeMediaStreamTrack]);
           console.log("[Captions] Using Stream audio track");
         } else {
+          if (forceGumForSttRef.current) {
+            console.warn("[Captions] Forcing getUserMedia for STT due to silent Stream mic track");
+          }
           console.log("[Captions] Falling back to getUserMedia");
           try {
             stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -1281,6 +1286,7 @@ const CaptionControls = ({
           
           console.log("[Captions] AudioWorklet nodes connected");
           
+          let consecutiveSilentFrames = 0;
           workletNode.port.onmessage = (event) => {
             if (stopped) return;
             const currentWs = socketRef.current;
@@ -1298,6 +1304,36 @@ const CaptionControls = ({
               }
               const rms = sampleN ? Math.sqrt(sumSq / sampleN) : 0;
               const hasAudio = rms >= 0.002;
+
+              // Auto-recover if Stream track produces only zeros (common on some SDK tracks).
+              try {
+                const isUsingStreamTrack = !!trackRef.current && !forceGumForSttRef.current;
+                if (isUsingStreamTrack) {
+                  if (rms < 0.0002) consecutiveSilentFrames += 1;
+                  else consecutiveSilentFrames = 0;
+
+                  // Roughly ~50 logs ~= ~2 seconds, but frame rate depends on buffer size.
+                  if (consecutiveSilentFrames >= 120) {
+                    const now = Date.now();
+                    if (now - lastSttAudioRecoveryAtMsRef.current >= 5000) {
+                      lastSttAudioRecoveryAtMsRef.current = now;
+                      forceGumForSttRef.current = true;
+                      consecutiveSilentFrames = 0;
+                      console.warn("[Captions] Detected silent Stream mic PCM; restarting captions using getUserMedia for STT", {
+                        trackEnabled: trackRef.current?.enabled,
+                        trackMuted: trackRef.current?.muted,
+                        trackReadyState: trackRef.current?.readyState,
+                      });
+                      try {
+                        setRestartSeq((v) => v + 1);
+                      } catch {
+                      }
+                      return;
+                    }
+                  }
+                }
+              } catch {
+              }
               
               // Always send audio data to keep connection alive
               const down = downsampleBuffer(inputBuffer, audioCtx.sampleRate, 16000);
@@ -1348,6 +1384,30 @@ const CaptionControls = ({
             }
             const rms = sampleN ? Math.sqrt(sumSq / sampleN) : 0;
             const hasAudio = rms >= 0.002;
+
+            try {
+              const isUsingStreamTrack = !!trackRef.current && !forceGumForSttRef.current;
+              if (isUsingStreamTrack) {
+                if (rms < 0.0002) {
+                  const now = Date.now();
+                  if (now - lastSttAudioRecoveryAtMsRef.current >= 5000) {
+                    lastSttAudioRecoveryAtMsRef.current = now;
+                    forceGumForSttRef.current = true;
+                    console.warn("[Captions] Detected silent Stream mic PCM (fallback path); restarting captions using getUserMedia for STT", {
+                      trackEnabled: trackRef.current?.enabled,
+                      trackMuted: trackRef.current?.muted,
+                      trackReadyState: trackRef.current?.readyState,
+                    });
+                    try {
+                      setRestartSeq((v) => v + 1);
+                    } catch {
+                    }
+                    return;
+                  }
+                }
+              }
+            } catch {
+            }
             
             // Always send audio data to keep connection alive
             const down = downsampleBuffer(input, audioCtx.sampleRate, 16000);
