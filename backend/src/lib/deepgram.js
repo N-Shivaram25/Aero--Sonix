@@ -9,6 +9,7 @@ const requireDeepgramKey = () => {
 export const createDeepgramConnection = ({ language }) => {
   const key = requireDeepgramKey();
   const lang = String(language || "").trim() || "multi";
+  const baseLang = lang.split("-")[0];
 
   // Deepgram models have language availability constraints. Some languages (e.g. Telugu)
   // may not be supported by nova-2 and will cause a 400 during WS handshake.
@@ -36,9 +37,8 @@ export const createDeepgramConnection = ({ language }) => {
     "multi",
   ]);
 
-  // Telugu is supported by nova-3, but not by nova-2.
-  // Use nova-3 for te to avoid handshake failures / no-results behavior.
-  const forceNova3 = lang === "te";
+  // Telugu is supported by nova-3. Prefer nova-3 for te / te-IN.
+  const forceNova3 = baseLang === "te";
 
   // Deepgram's /v1/listen is streaming-only. Use a streaming-capable model.
   const preferredModel = forceNova3 ? "nova-3" : (NOVA2_LANGS.has(lang) ? "nova-2" : "nova-3");

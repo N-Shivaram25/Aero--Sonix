@@ -29,8 +29,8 @@ export const toDeepgramLanguageCode = (language) => {
 
   const map = {
     english: "en",
-    telugu: "te",
-    hindi: "hi",
+    telugu: "te-IN",
+    hindi: "hi-IN",
     spanish: "es",
     french: "fr",
     german: "de",
