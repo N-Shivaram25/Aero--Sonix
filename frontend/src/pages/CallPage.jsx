@@ -1127,6 +1127,10 @@ const CaptionControls = ({
 
             const isLocalSpeaker = String(data?.speaker_user_id || "") === String(authUserIdRef.current || "");
 
+            // Strict mode: only render the opponent's captions. Even though the backend
+            // already avoids sending self-transcripts, keep this guard to prevent leaks.
+            if (isLocalSpeaker) return;
+
             const originalText = String(data?.original_text || "").trim();
             if (!originalText) return;
 

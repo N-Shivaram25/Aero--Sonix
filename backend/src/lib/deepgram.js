@@ -36,19 +36,16 @@ export const createDeepgramConnection = ({ language }) => {
     "multi",
   ]);
 
-  // Deepgram's /v1/listen is streaming-only. Whisper models are REST-only and will
-  // return 405 (Method Not Allowed) if used here. Use a streaming-capable fallback.
-  const preferredModel = NOVA2_LANGS.has(lang) ? "nova-2" : "nova-2-general";
+  // Telugu is supported by nova-3, but not by nova-2.
+  // Use nova-3 for te to avoid handshake failures / no-results behavior.
+  const forceNova3 = lang === "te";
+
+  // Deepgram's /v1/listen is streaming-only. Use a streaming-capable model.
+  const preferredModel = forceNova3 ? "nova-3" : (NOVA2_LANGS.has(lang) ? "nova-2" : "nova-3");
 
   const url = new URL("wss://api.deepgram.com/v1/listen");
   url.searchParams.set("model", preferredModel);
-  // When using the general model, prefer auto-detect to avoid handshake failures
-  // on strict language constraints.
-  if (preferredModel === "nova-2") {
-    url.searchParams.set("language", lang);
-  } else {
-    url.searchParams.set("language", "multi");
-  }
+  url.searchParams.set("language", lang);
   url.searchParams.set("interim_results", "true");
   url.searchParams.set("smart_format", "true");
   url.searchParams.set("punctuate", "true");
