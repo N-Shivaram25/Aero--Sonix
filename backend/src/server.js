@@ -20,7 +20,8 @@ import googleRoutes from "./routes/google.route.js";
 import { connectDB } from "./lib/db.js";
 import User from "./models/User.js";
 
-import { GoogleCloudSTT, GoogleCloudTranslation, normalizeLanguageCode } from "./lib/googleCloud.js";
+import { createDeepgramConnection } from "./lib/deepgram.js";
+import { toDeepgramLanguageCode } from "./lib/languageCodes.js";
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -234,7 +235,7 @@ const setupGoogleCloudWsProxy = (server) => {
       }
     }
     
-    const speakerLanguageCode = normalizeLanguageCode(speakerLanguageRaw) || 'en';
+    const speakerLanguageCode = toDeepgramLanguageCode(speakerLanguageRaw) || 'en';
     
     console.log("[GoogleCloudProxy] Speaker profile language:", speakerLanguageRaw, "->", speakerLanguageCode);
     
@@ -265,7 +266,7 @@ const setupGoogleCloudWsProxy = (server) => {
     // Profile-to-profile translation: each listener receives translation in their own profile nativeLanguage.
     // Keep reading target_language for backward compatibility, but prefer profile language.
     const myTargetLanguageRaw = (speakerLanguageRaw || url?.searchParams?.get("target_language") || url?.searchParams?.get("targetLanguage") || "english").trim();
-    const myTargetLanguageCode = normalizeLanguageCode(myTargetLanguageRaw) || 'en';
+    const myTargetLanguageCode = toDeepgramLanguageCode(myTargetLanguageRaw) || 'en';
 
     const myUserId = String(speaker?._id || speaker?.id || "");
     const myUserName = String(speaker?.fullName || "");
@@ -337,29 +338,16 @@ const setupGoogleCloudWsProxy = (server) => {
       console.error("[GoogleCloudProxy] Error sending meta info:", error);
     }
 
-    // Initialize Google Cloud services
-    const sttService = new GoogleCloudSTT();
-    const translationService = new GoogleCloudTranslation();
-    
-    let recognizeStream = null;
+    // Deepgram STT (streaming)
+    let dg = null;
     let closed = false;
-    const interimTranslationState = new Map();
-    let rotateTimer = null;
-    let restarting = false;
     
     const cleanup = (reason) => {
       if (closed) return;
       closed = true;
       console.log("[GoogleCloudProxy] cleanup", reason || "(no reason)");
       try {
-        if (rotateTimer) clearTimeout(rotateTimer);
-      } catch {
-      }
-      rotateTimer = null;
-      try {
-        if (recognizeStream) {
-          recognizeStream.destroy();
-        }
+        if (dg?.connection) dg.connection.finish();
       } catch {
       }
       try {
@@ -368,177 +356,84 @@ const setupGoogleCloudWsProxy = (server) => {
       }
     };
 
-    const restartRecognition = (reason) => {
-      if (closed || restarting) return;
-      restarting = true;
-      console.log("[GoogleCloudProxy] Restarting recognition stream", reason || "(no reason)");
-
+    try {
+      dg = createDeepgramConnection({ language: speakerLanguageCode || "multi" });
+    } catch (error) {
+      console.error("[DeepgramProxy] Failed to initialize Deepgram:", error);
       try {
-        if (rotateTimer) clearTimeout(rotateTimer);
+        clientWs.send(JSON.stringify({ type: "error", message: error?.message || "Deepgram init failed" }));
       } catch {
       }
-      rotateTimer = null;
+      cleanup("Deepgram init failed");
+      return;
+    }
 
+    const dgConn = dg.connection;
+    const Events = dg.LiveTranscriptionEvents;
+
+    dgConn.on(Events.Open, () => {
+      console.log("[DeepgramProxy] Deepgram connection opened");
+    });
+
+    dgConn.on(Events.Transcript, (data) => {
+      if (closed) return;
       try {
-        if (recognizeStream && !recognizeStream.destroyed) {
-          recognizeStream.destroy();
+        const alt = data?.channel?.alternatives?.[0];
+        const originalText = String(alt?.transcript || "");
+        if (!originalText.trim()) return;
+
+        const isFinal = Boolean(data?.is_final);
+        const speechFinal = Boolean(data?.speech_final);
+        const confidence = typeof alt?.confidence === "number" ? alt.confidence : 0;
+
+        const currentRoom = getRoom(callId);
+        if (!currentRoom) return;
+
+        for (const [, peer] of currentRoom.entries()) {
+          if (!peer?.ws || peer.userId === myUserId) continue;
+
+          const peerTargetCode = toDeepgramLanguageCode(peer.nativeLanguage) || 'en';
+          const outgoing = {
+            type: "transcript",
+            original_text: originalText,
+            original_language: speakerLanguageCode,
+            translated_text: null,
+            translated_language: null,
+            is_final: isFinal,
+            speech_final: speechFinal,
+            confidence,
+            stability: confidence,
+            language_code: speakerLanguageCode,
+            speaker_profile_language: speakerLanguageCode,
+            speaker_profile_language_raw: speakerLanguageRaw,
+            target_language: peerTargetCode,
+            target_language_raw: peer.nativeLanguage,
+            speaker_user_id: myUserId,
+            speaker_full_name: myUserName,
+            call_id: callId,
+          };
+
+          try {
+            peer.ws.send(JSON.stringify(outgoing));
+          } catch {
+          }
         }
+      } catch (err) {
+        console.error("[DeepgramProxy] Transcript processing error:", err);
+      }
+    });
+
+    dgConn.on(Events.Error, (err) => {
+      console.error("[DeepgramProxy] Deepgram error:", err);
+      try {
+        clientWs.send(JSON.stringify({ type: "error", message: err?.message || "Deepgram error" }));
       } catch {
       }
-      recognizeStream = null;
+    });
 
-      setTimeout(() => {
-        restarting = false;
-        if (!closed) startRecognition();
-      }, 300);
-    };
-
-    const startRecognition = () => {
-      if (closed || !sttService) return;
-      
-      try {
-        console.log("[GoogleCloudProxy] Starting recognition stream");
-        
-        const config = sttService.getSpeechConfig(speakerLanguageCode);
-        const request = {
-          config: config,
-          interimResults: true,
-        };
-        
-        recognizeStream = sttService.speechClient.streamingRecognize(request)
-          .on('error', (error) => {
-            console.error('[GoogleCloudProxy] Recognition stream error:', error);
-            try {
-              clientWs.send(JSON.stringify({ type: "error", message: `Recognition error: ${error.message}` }));
-            } catch {
-            }
-            // Properly destroy stream to prevent further writes
-            const msg = String(error?.message || "");
-            if (msg.includes("Exceeded maximum allowed stream duration")) {
-              restartRecognition("duration_limit");
-              return;
-            }
-            restartRecognition("error");
-          })
-          .on('data', async (data) => {
-            if (closed) return;
-            
-            try {
-              console.log('[GoogleCloudProxy] Received recognition data:', JSON.stringify(data, null, 2));
-              
-              if (data.results && data.results.length > 0) {
-                const result = data.results[0];
-                const originalText = result.alternatives[0]?.transcript || '';
-                const isFinal = result.isFinal;
-                const stability = typeof result.stability === 'number' ? result.stability : 0;
-                
-                if (originalText.trim()) {
-                  console.log('[GoogleCloudProxy] Transcript:', originalText);
-                  console.log('[GoogleCloudProxy] Is final:', isFinal);
-                  console.log('[GoogleCloudProxy] Stability:', stability);
-
-                  const currentRoom = getRoom(callId);
-                  if (!currentRoom) return;
-
-                  for (const [, peer] of currentRoom.entries()) {
-                    if (!peer?.ws || peer.userId === myUserId) continue;
-
-                    const peerTargetCode = normalizeLanguageCode(peer.nativeLanguage) || 'en';
-                    let translatedText = null;
-
-                    const shouldTranslate = peerTargetCode !== speakerLanguageCode;
-                    const gateKey = `${myUserId}__${peer.userId}`;
-                    const nowMs = Date.now();
-                    const prevState = interimTranslationState.get(gateKey);
-
-                    const stableInterim = !isFinal && stability >= 0.85;
-                    const interimThrottleMs = stableInterim ? 800 : 2500;
-                    const canTranslateInterim =
-                      !isFinal &&
-                      shouldTranslate &&
-                      originalText.trim().length >= 6 &&
-                      (!prevState || nowMs - prevState.lastAtMs >= interimThrottleMs || prevState.lastText !== originalText);
-
-                    // Translate on final always; translate interim only with throttling.
-                    if ((isFinal && shouldTranslate) || canTranslateInterim) {
-                      try {
-                        const translation = await translationService.translateText(
-                          originalText,
-                          peerTargetCode,
-                          speakerLanguageCode
-                        );
-                        translatedText = translation.translatedText;
-                        if (!isFinal) {
-                          interimTranslationState.set(gateKey, { lastAtMs: nowMs, lastText: originalText });
-                        }
-                      } catch (translationError) {
-                        console.error('[GoogleCloudProxy] Translation error:', translationError);
-                      }
-                    }
-
-                    const outgoing = {
-                      type: 'transcript',
-                      original_text: originalText,
-                      original_language: speakerLanguageCode,
-                      translated_text: translatedText,
-                      translated_language: translatedText ? peerTargetCode : null,
-                      is_final: Boolean(isFinal),
-                      stability,
-                      language_code: speakerLanguageCode,
-                      speaker_profile_language: speakerLanguageCode,
-                      speaker_profile_language_raw: speakerLanguageRaw,
-                      target_language: peerTargetCode,
-                      target_language_raw: peer.nativeLanguage,
-                      speaker_user_id: myUserId,
-                      speaker_full_name: myUserName,
-                      call_id: callId,
-                    };
-
-                    try {
-                      peer.ws.send(JSON.stringify(outgoing));
-                    } catch {
-                    }
-                  }
-                }
-              }
-            } catch (error) {
-              console.error('[GoogleCloudProxy] Error processing recognition data:', error);
-            }
-          })
-          .on('end', () => {
-            console.log('[GoogleCloudProxy] Recognition stream ended');
-            if (!closed) {
-              restartRecognition("end");
-            }
-          })
-          .on('close', () => {
-            console.log('[GoogleCloudProxy] Recognition stream closed');
-          });
-
-        // Proactively rotate the recognition stream before Google hard limit (~305s).
-        try {
-          if (rotateTimer) clearTimeout(rotateTimer);
-        } catch {
-        }
-        rotateTimer = setTimeout(() => {
-          restartRecognition("proactive_rotate");
-        }, 290 * 1000);
-
-      } catch (error) {
-        console.error('[GoogleCloudProxy] Error starting recognition:', error);
-        try {
-          clientWs.send(JSON.stringify({ type: "error", message: "Failed to start recognition" }));
-        } catch {
-        }
-        // Retry after delay
-        if (!closed) {
-          setTimeout(() => restartRecognition("start_failed"), 2000);
-        }
-      }
-    };
-
-    // Start recognition
-    startRecognition();
+    dgConn.on(Events.Close, () => {
+      console.log("[DeepgramProxy] Deepgram connection closed");
+    });
 
     // Forward audio chunks from client to recognition stream
     clientWs.on("message", (chunk) => {
@@ -547,8 +442,12 @@ const setupGoogleCloudWsProxy = (server) => {
       try {
         // Handle binary audio data - write directly to stream
         if (chunk instanceof Buffer) {
-          if (recognizeStream && !recognizeStream.destroyed) {
-            recognizeStream.write(chunk);
+          try {
+            const readyState = typeof dgConn?.getReadyState === "function" ? dgConn.getReadyState() : null;
+            if (readyState === 1) {
+              dgConn.send(chunk);
+            }
+          } catch {
           }
         }
         
