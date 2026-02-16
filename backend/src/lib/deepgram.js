@@ -11,15 +11,24 @@ export const createDeepgramConnection = ({ language }) => {
   const lang = String(language || "").trim() || "multi";
   const baseLang = lang.split("-")[0];
 
+  // Deepgram language parameters are model-dependent. Some languages (like Hindi/Telugu)
+  // are specified without region in Deepgram's STT models.
+  const sttLanguage = (() => {
+    if (lang === "multi") return "multi";
+    if (baseLang === "hi") return "hi";
+    if (baseLang === "te") return "te";
+    return lang;
+  })();
+
+  // Telugu is supported by nova-3. Prefer nova-3 for te / te-IN.
+  const forceNova3 = baseLang === "te";
+
   // Deepgram models have language availability constraints. Some languages (e.g. Telugu)
   // may not be supported by nova-2 and will cause a 400 during WS handshake.
   // We pick a safer fallback model for those cases.
   const NOVA2_LANGS = new Set([
     "en",
     "hi",
-    "hi-IN",
-    "te",
-    "te-IN",
     "es",
     "fr",
     "de",
@@ -40,12 +49,12 @@ export const createDeepgramConnection = ({ language }) => {
     "multi",
   ]);
 
-  // Default to nova-2 for supported languages; fallback to nova-3 for others
-  const preferredModel = NOVA2_LANGS.has(lang) ? "nova-2" : "nova-3";
+  // Default to nova-2 for supported base languages; fallback to nova-3 for others.
+  const preferredModel = forceNova3 ? "nova-3" : (NOVA2_LANGS.has(baseLang) ? "nova-2" : "nova-3");
 
   const url = new URL("wss://api.deepgram.com/v1/listen");
   url.searchParams.set("model", preferredModel);
-  url.searchParams.set("language", lang);
+  url.searchParams.set("language", sttLanguage);
   url.searchParams.set("interim_results", "true");
   url.searchParams.set("smart_format", "true");
   url.searchParams.set("punctuate", "true");
