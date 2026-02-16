@@ -1006,7 +1006,14 @@ const CaptionControls = ({
           }
           console.log("[Captions] Falling back to getUserMedia");
           try {
-            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                channelCount: 1,
+              },
+            });
           } catch {
             toast.error("Captions: could not access microphone. Please allow mic permissions.");
             throw new Error("getUserMedia failed");
@@ -1131,11 +1138,26 @@ const CaptionControls = ({
             // already avoids sending self-transcripts, keep this guard to prevent leaks.
             if (isLocalSpeaker) return;
 
-            const originalText = String(data?.original_text || "").trim();
+            const cleanCaptionText = (t) => {
+              const s = String(t || "").replace(/\s+/g, " ").trim();
+              if (!s) return "";
+              const first = s[0];
+              const rest = s.slice(1);
+              return first.toUpperCase() + rest;
+            };
+
+            const originalText = cleanCaptionText(data?.original_text);
             if (!originalText) return;
 
             const isFinal = data?.is_final === true;
             const stability = Number.isFinite(data?.stability) ? Number(data.stability) : 0;
+            const confidence = Number.isFinite(data?.confidence) ? Number(data.confidence) : stability;
+
+            const MIN_INTERIM_STABILITY = 0.85;
+            const MIN_FINAL_CONFIDENCE = 0.6;
+
+            if (!isFinal && stability < MIN_INTERIM_STABILITY) return;
+            if (isFinal && confidence < MIN_FINAL_CONFIDENCE) return;
             const speakerName = isLocalSpeaker
               ? "You"
               : String(data?.speaker_full_name || data?.speaker || "Speaker");
@@ -1213,13 +1235,13 @@ const CaptionControls = ({
 
             seg.lastOriginal = originalText;
 
-            if (data?.translated_text) {
+            if (data?.translated_text && isFinal) {
               const translatedCaption = {
                 id: `${Date.now()}-t`,
                 replaceId: `${utteranceKey}-translation`,
                 utteranceKey,
                 speaker: speakerName,
-                text: String(data.translated_text || ""),
+                text: cleanCaptionText(data.translated_text),
                 timestamp: new Date().toISOString(),
                 type: "translation",
                 isFinal,
@@ -1231,7 +1253,7 @@ const CaptionControls = ({
               };
               pushCaption(translatedCaption);
 
-              seg.lastTranslated = String(data.translated_text || "");
+              seg.lastTranslated = cleanCaptionText(data.translated_text);
             }
 
             // Speak only once per utterance (on final or pause), to avoid repeats and 429.
@@ -1319,7 +1341,8 @@ const CaptionControls = ({
                   // Roughly ~50 logs ~= ~2 seconds, but frame rate depends on buffer size.
                   if (consecutiveSilentFrames >= 120) {
                     const now = Date.now();
-                    if (now - lastSttAudioRecoveryAtMsRef.current >= 5000) {
+                    // Cooldown so we don't restart repeatedly and lose context (hurts accuracy).
+                    if (now - lastSttAudioRecoveryAtMsRef.current >= 15000) {
                       lastSttAudioRecoveryAtMsRef.current = now;
                       forceGumForSttRef.current = true;
                       consecutiveSilentFrames = 0;
@@ -1394,7 +1417,8 @@ const CaptionControls = ({
               if (isUsingStreamTrack) {
                 if (rms < 0.0002) {
                   const now = Date.now();
-                  if (now - lastSttAudioRecoveryAtMsRef.current >= 5000) {
+                  // Cooldown so we don't restart repeatedly and lose context (hurts accuracy).
+                  if (now - lastSttAudioRecoveryAtMsRef.current >= 15000) {
                     lastSttAudioRecoveryAtMsRef.current = now;
                     forceGumForSttRef.current = true;
                     console.warn("[Captions] Detected silent Stream mic PCM (fallback path); restarting captions using getUserMedia for STT", {

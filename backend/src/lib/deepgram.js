@@ -58,10 +58,29 @@ export const createDeepgramConnection = ({ language }) => {
   url.searchParams.set("interim_results", "true");
   url.searchParams.set("smart_format", "true");
   url.searchParams.set("punctuate", "true");
-  url.searchParams.set("endpointing", "300");
+  // A slightly longer endpointing produces more natural sentence boundaries.
+  url.searchParams.set("endpointing", "500");
+  // Ask Deepgram to emit sentence/utterance-level boundaries (best for captions).
+  url.searchParams.set("utterances", "true");
+  url.searchParams.set("vad_events", "true");
+  url.searchParams.set("utterance_end_ms", "1000");
   url.searchParams.set("encoding", "linear16");
   url.searchParams.set("sample_rate", "16000");
   url.searchParams.set("channels", "1");
+
+  // Optional: keyword boosting for names/terms to improve recognition.
+  // Format: DEEPGRAM_KEYWORDS="Shiva:2,Shreekar:2,Aero Sonix:3"
+  const keywordsRaw = String(process.env.DEEPGRAM_KEYWORDS || "").trim();
+  if (keywordsRaw) {
+    try {
+      for (const raw of keywordsRaw.split(",")) {
+        const item = String(raw || "").trim();
+        if (!item) continue;
+        url.searchParams.append("keywords", item);
+      }
+    } catch {
+    }
+  }
 
   try {
     console.log("[Deepgram] listen url", url.toString());
