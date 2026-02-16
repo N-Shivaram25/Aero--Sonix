@@ -781,7 +781,7 @@ const CaptionControls = ({
     }
     silenceTimerRef.current = setTimeout(() => {
       flushInterimAsLine();
-    }, 3000);
+    }, 2000);
   };
 
   useEffect(() => {
@@ -1245,7 +1245,7 @@ const CaptionControls = ({
                 // Option 1: finalize early on stable interim.
                 finalizeUtterance();
               } else {
-                seg.pauseTimer = setTimeout(finalizeUtterance, 900);
+                seg.pauseTimer = setTimeout(finalizeUtterance, 2000);
                 utteranceRef.current[segKey] = seg;
               }
             }
