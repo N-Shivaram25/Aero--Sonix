@@ -15,12 +15,14 @@ import adminRoutes from "./routes/admin.route.js";
 import profileRoutes from "./routes/profile.route.js";
 import callRoutes from "./routes/call.route.js";
 import aiRobotRoutes from "./routes/aiRobot.route.js";
+import translationRoutes from "./routes/translation.route.js";
 
 import { connectDB } from "./lib/db.js";
 import User from "./models/User.js";
 
 import { createDeepgramConnection } from "./lib/deepgram.js";
-import { toDeepgramLanguageCode } from "./lib/languageCodes.js";
+import { toDeepgramLanguageCode, toMyMemoryLanguageCode } from "./lib/languageCodes.js";
+import axios from "axios";
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -88,6 +90,7 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/call", callRoutes);
 app.use("/api/ai-robot", aiRobotRoutes);
+app.use("/api/translate", translationRoutes);
 
 // Also expose non-prefixed routes (useful when frontend points directly at backend base URL)
 app.use("/auth", authRoutes);
@@ -97,6 +100,7 @@ app.use("/admin", adminRoutes);
 app.use("/profile", profileRoutes);
 app.use("/call", callRoutes);
 app.use("/ai-robot", aiRobotRoutes);
+app.use("/translate", translationRoutes);
 
 // Simple public health endpoint for readiness checks
 app.get("/api/health", (req, res) => {
@@ -412,7 +416,8 @@ const setupGoogleCloudWsProxy = (server) => {
           if (!peer?.ws || peer.userId === myUserId) continue;
 
           const peerTargetCode = toDeepgramLanguageCode(peer.nativeLanguage) || 'en';
-          const outgoing = {
+          // Prepare base payload
+          const baseOutgoing = {
             type: "transcript",
             original_text: originalText,
             original_language: speakerLanguageCode,
@@ -432,10 +437,58 @@ const setupGoogleCloudWsProxy = (server) => {
             call_id: callId,
           };
 
-          try {
-            peer.ws.send(JSON.stringify(outgoing));
-          } catch {
+          // If source and target are the same, no translation needed
+          if (speakerLanguageCode === peerTargetCode) {
+            try {
+              peer.ws.send(JSON.stringify(baseOutgoing));
+            } catch {}
+            continue;
           }
+
+          // Throttle translation: only for final results to avoid spam
+          if (!isFinal) {
+            try {
+              peer.ws.send(JSON.stringify(baseOutgoing));
+            } catch {}
+            continue;
+          }
+
+          // Async translation (fire-and-forget with fallback)
+          (async () => {
+            try {
+              const sourceMyMemory = toMyMemoryLanguageCode(speakerLanguageRaw) || speakerLanguageCode.split('-')[0];
+              const targetMyMemory = toMyMemoryLanguageCode(peer.nativeLanguage) || peerTargetCode.split('-')[0];
+              const url = `http://localhost:${PORT}/api/translate`;
+              const response = await axios.post(url, {
+                text: originalText,
+                sourceLang: sourceMyMemory,
+                targetLang: targetMyMemory,
+              }, { timeout: 5000 });
+              const translatedText = response.data?.translatedText;
+              if (translatedText && typeof translatedText === "string") {
+                baseOutgoing.translated_text = translatedText;
+                baseOutgoing.translated_language = peerTargetCode;
+                console.log("[DeepgramProxy] Translation success", {
+                  sourceLang: sourceMyMemory,
+                  targetLang: targetMyMemory,
+                  original: originalText.substring(0, 60),
+                  translated: translatedText.substring(0, 60),
+                });
+              } else {
+                console.warn("[DeepgramProxy] Translation missing", { response: response.data });
+              }
+            } catch (err) {
+              console.warn("[DeepgramProxy] Translation error", {
+                sourceLang: speakerLanguageCode,
+                targetLang: peerTargetCode,
+                original: originalText.substring(0, 60),
+                error: err.message || err,
+              });
+            }
+            try {
+              peer.ws.send(JSON.stringify(baseOutgoing));
+            } catch {}
+          })();
         }
       } catch (err) {
         console.error("[DeepgramProxy] Transcript processing error:", err);

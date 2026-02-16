@@ -83,6 +83,36 @@ export const toGoogleSttLanguageCode = (language) => {
   return map[key] || null;
 };
 
+export const toMyMemoryLanguageCode = (language) => {
+  if (!language || typeof language !== "string") return null;
+  const key = language.trim().toLowerCase();
+
+  const map = {
+    english: "en",
+    telugu: "te",
+    hindi: "hi",
+    spanish: "es",
+    french: "fr",
+    german: "de",
+    mandarin: "zh",
+    japanese: "ja",
+    korean: "ko",
+    russian: "ru",
+    portuguese: "pt",
+    arabic: "ar",
+    italian: "it",
+    turkish: "tr",
+    dutch: "nl",
+    vietnamese: "vi",
+    swedish: "sv",
+    polish: "pl",
+    greek: "el",
+    hebrew: "he",
+  };
+
+  return map[key] || null;
+};
+
 export const toWhisperLanguageCode = (language) => {
   if (!language || typeof language !== "string") return null;
   const key = language.trim().toLowerCase();

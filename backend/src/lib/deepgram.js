@@ -17,6 +17,9 @@ export const createDeepgramConnection = ({ language }) => {
   const NOVA2_LANGS = new Set([
     "en",
     "hi",
+    "hi-IN",
+    "te",
+    "te-IN",
     "es",
     "fr",
     "de",
@@ -37,11 +40,8 @@ export const createDeepgramConnection = ({ language }) => {
     "multi",
   ]);
 
-  // Telugu is supported by nova-3. Prefer nova-3 for te / te-IN.
-  const forceNova3 = baseLang === "te";
-
-  // Deepgram's /v1/listen is streaming-only. Use a streaming-capable model.
-  const preferredModel = forceNova3 ? "nova-3" : (NOVA2_LANGS.has(lang) ? "nova-2" : "nova-3");
+  // Default to nova-2 for supported languages; fallback to nova-3 for others
+  const preferredModel = NOVA2_LANGS.has(lang) ? "nova-2" : "nova-3";
 
   const url = new URL("wss://api.deepgram.com/v1/listen");
   url.searchParams.set("model", preferredModel);
