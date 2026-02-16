@@ -7,6 +7,7 @@ import fs from "fs";
 import http from "http";
 import jwt from "jsonwebtoken";
 import { WebSocketServer, WebSocket } from "ws";
+import axios from "axios";
 
 import authRoutes from "./routes/auth.route.js";
 import userRoutes from "./routes/user.route.js";
@@ -26,6 +27,38 @@ const app = express();
 const PORT = process.env.PORT || 5001;
 
 const __dirname = path.resolve();
+
+const toBaseLang = (code) => {
+  const v = String(code || "").trim();
+  if (!v) return "";
+  return v.split("-")[0];
+};
+
+const translationCache = new Map();
+const translateWithMyMemory = async ({ text, sourceLang, targetLang }) => {
+  const clean = String(text || "").trim();
+  if (!clean) return "";
+
+  const src = toBaseLang(sourceLang) || "";
+  const dst = toBaseLang(targetLang) || "";
+  if (!src || !dst || src === dst) return "";
+
+  const cacheKey = `${src}|${dst}|${clean}`;
+  const cached = translationCache.get(cacheKey);
+  if (cached) return cached;
+
+  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(clean)}&langpair=${src}|${dst}`;
+  const resp = await axios.get(url, { timeout: 8000 });
+  const translated = String(resp?.data?.responseData?.translatedText || "").trim();
+  if (!translated) return "";
+
+  try {
+    if (translationCache.size > 2000) translationCache.clear();
+  } catch {
+  }
+  translationCache.set(cacheKey, translated);
+  return translated;
+};
 
 const normalizeOrigin = (value) => {
   if (!value) return value;
