@@ -223,7 +223,7 @@ const App = () => {
   );
 
   return (
-    <div className="min-h-screen" data-theme={theme}>
+    <div className="min-h-screen w-full overflow-x-hidden" data-theme={theme}>
       {isAuthenticated && !isPublicRoute ? (
         <StreamChatProvider authUser={authUser}>{routes}</StreamChatProvider>
       ) : (

@@ -146,8 +146,8 @@ const HomePage = () => {
   }, [friends, recommendedUsers, incomingRequests, ensureUsersPresence]);
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 bg-base-100 min-h-full">
-      <div className="container mx-auto space-y-10">
+    <div className="p-4 sm:p-6 lg:p-8 bg-base-100 min-h-full w-full overflow-x-hidden">
+      <div className="container mx-auto space-y-10 w-full max-w-full">
         {/* Mobile Navigation Tabs - Only visible on mobile */}
         <div className="lg:hidden">
           <MobileNavigationTabs 

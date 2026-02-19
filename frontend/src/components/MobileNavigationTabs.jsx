@@ -36,8 +36,8 @@ const MobileNavigationTabs = ({ activeTab, onTabChange }) => {
   ];
 
   return (
-    <div className="lg:hidden bg-base-100 border-b border-base-300 sticky top-0 z-40">
-      <div className="flex overflow-x-auto scrollbar-hide px-4 py-3 gap-2">
+    <div className="lg:hidden bg-base-100 border-b border-base-300 sticky top-0 z-40 w-full overflow-x-hidden">
+      <div className="flex overflow-x-auto scrollbar-hide px-4 py-3 gap-2 min-w-0">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;

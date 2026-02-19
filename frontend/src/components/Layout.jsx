@@ -30,7 +30,7 @@ const Layout = ({ children, showSidebar = false }) => {
   };
 
   return (
-    <div className="min-h-screen bg-base-100">
+    <div className="min-h-screen bg-base-100 w-full overflow-x-hidden">
       {showSidebar ? (
         <div className="drawer lg:drawer-open">
           <input id="app-drawer" type="checkbox" className="drawer-toggle" />

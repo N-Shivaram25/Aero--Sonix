@@ -58,7 +58,7 @@ const MobileCategoryViews = ({
 
   // Render different category views
   const renderFriendsView = () => (
-    <div className="bg-base-100 min-h-full">
+    <div className="bg-base-100 min-h-full w-full">
       {/* Search bar */}
       <div className="sticky top-0 bg-base-100 z-30 p-4 border-b border-base-200">
         <div className="relative">
@@ -68,17 +68,20 @@ const MobileCategoryViews = ({
             placeholder="Search friends..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-base-200 border border-base-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+            className="w-full pl-10 pr-4 py-3 bg-base-200 border border-base-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
           />
         </div>
       </div>
 
       {/* Friends list */}
-      <div className="divide-y divide-base-200">
+      <div className="p-4 space-y-3">
         {enhancedFriends.length === 0 ? (
-          <div className="p-8 text-center text-base-content/60">
-            <UsersIcon className="w-12 h-12 mx-auto mb-3 opacity-50" />
-            <p>No friends found</p>
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="w-20 h-20 bg-base-200 rounded-full flex items-center justify-center mb-4">
+              <UsersIcon className="w-10 h-10 text-base-content/40" />
+            </div>
+            <h3 className="text-lg font-semibold text-base-content/80 mb-1">No friends yet</h3>
+            <p className="text-sm text-base-content/60">Start connecting with language partners!</p>
           </div>
         ) : (
           enhancedFriends.map((friend) => (
@@ -95,9 +98,9 @@ const MobileCategoryViews = ({
   );
 
   const renderLanguagesView = () => (
-    <div className="bg-base-100 min-h-full">
-      <div className="p-4">
-        <div className="mb-4">
+    <div className="bg-base-100 min-h-full w-full">
+      <div className="p-4 w-full">
+        <div className="mb-4 w-full">
           <SupportedLanguagesDropdown
             onLanguageSelect={saveLanguageMutation}
             currentLanguage={authUser?.nativeLanguage}
@@ -116,7 +119,7 @@ const MobileCategoryViews = ({
   );
 
   const renderRecentlyAddedView = () => (
-    <div className="bg-base-100 min-h-full">
+    <div className="bg-base-100 min-h-full w-full">
       {/* Search bar */}
       <div className="sticky top-0 bg-base-100 z-30 p-4 border-b border-base-200">
         <div className="relative">
@@ -126,16 +129,20 @@ const MobileCategoryViews = ({
             placeholder="Search recently added..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-base-200 border border-base-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+            className="w-full pl-10 pr-4 py-3 bg-base-200 border border-base-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
           />
         </div>
       </div>
 
       {/* Recently added list */}
-      <div className="divide-y divide-base-200">
+      <div className="p-4 space-y-3">
         {recentlyAddedFriends.length === 0 ? (
-          <div className="p-8 text-center text-base-content/60">
-            <p>No recently added friends</p>
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="w-20 h-20 bg-base-200 rounded-full flex items-center justify-center mb-4">
+              <ClockIcon className="w-10 h-10 text-base-content/40" />
+            </div>
+            <h3 className="text-lg font-semibold text-base-content/80 mb-1">No recent additions</h3>
+            <p className="text-sm text-base-content/60">Your recently added friends will appear here</p>
           </div>
         ) : (
           recentlyAddedFriends.map(({ item }) => (
@@ -158,7 +165,7 @@ const MobileCategoryViews = ({
   );
 
   const renderRequestsView = () => (
-    <div className="bg-base-100 min-h-full">
+    <div className="bg-base-100 min-h-full w-full">
       {/* Search bar */}
       <div className="sticky top-0 bg-base-100 z-30 p-4 border-b border-base-200">
         <div className="relative">
@@ -168,52 +175,74 @@ const MobileCategoryViews = ({
             placeholder="Search requests..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-base-200 border border-base-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+            className="w-full pl-10 pr-4 py-3 bg-base-200 border border-base-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
           />
         </div>
       </div>
 
       {/* Requests list */}
-      <div className="divide-y divide-base-200">
+      <div className="p-4 space-y-3">
         {filteredRequests.length === 0 ? (
-          <div className="p-8 text-center text-base-content/60">
-            <BellIcon className="w-12 h-12 mx-auto mb-3 opacity-50" />
-            <p>No pending friend requests</p>
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="w-20 h-20 bg-base-200 rounded-full flex items-center justify-center mb-4">
+              <BellIcon className="w-10 h-10 text-base-content/40" />
+            </div>
+            <h3 className="text-lg font-semibold text-base-content/80 mb-1">No pending requests</h3>
+            <p className="text-sm text-base-content/60">You're all caught up! Check back later.</p>
           </div>
         ) : (
           filteredRequests.map((req) => (
-            <div key={req._id} className="p-4 hover:bg-base-200 transition-colors">
-              <div className="flex items-center gap-3">
+            <div key={req._id} className="bg-base-200 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all duration-200">
+              <div className="flex items-start gap-4">
                 <div className="relative flex-shrink-0">
-                  <div className="w-12 h-12 rounded-full overflow-hidden bg-base-300">
+                  <div className="w-16 h-16 rounded-2xl overflow-hidden bg-base-300 ring-2 ring-base-100">
                     <img src={req.sender.profilePic} alt={req.sender.fullName} className="w-full h-full object-cover" />
                   </div>
                   <span 
-                    className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-base-100 ${
-                      onlineMap?.[req.sender?._id] ? "bg-success" : "bg-neutral-500"
+                    className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-3 border-base-200 ${
+                      onlineMap?.[req.sender?._id] ? "bg-success" : "bg-neutral-400"
                     }`}
                     title={onlineMap?.[req.sender?._id] ? "Online" : "Offline"}
                   />
                 </div>
 
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold truncate">{req.sender.fullName}</h3>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-xs text-base-content/70">
-                      {getCountryFlag(req.sender.country)} {req.sender.country || ""}
-                    </span>
-                    <span className="text-xs text-base-content/70">
-                      Language: {req.sender.nativeLanguage || ""}
-                    </span>
+                  <h3 className="font-bold text-lg text-base-content mb-2">{req.sender.fullName}</h3>
+                  
+                  <div className="space-y-2 mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-base-content/70">Country:</span>
+                      <span className="text-sm text-base-content">
+                        {getCountryFlag(req.sender.country)} {req.sender.country || "Unknown"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-base-content/70">Language:</span>
+                      <span className="text-sm text-base-content">
+                        {req.sender.nativeLanguage || "Not specified"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      className="flex-1 btn btn-primary rounded-xl font-medium"
+                      onClick={() => acceptRequestMutation(req._id)}
+                    >
+                      <CheckCircleIcon className="w-4 h-4 mr-2" />
+                      Accept
+                    </button>
+                    <button
+                      className="btn btn-outline rounded-xl"
+                      onClick={() => {
+                        // Optional: Add decline functionality if needed
+                        toast.error("Decline feature coming soon!");
+                      }}
+                    >
+                      <XIcon className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
-
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={() => acceptRequestMutation(req._id)}
-                >
-                  Accept
-                </button>
               </div>
             </div>
           ))
@@ -223,7 +252,7 @@ const MobileCategoryViews = ({
   );
 
   const renderParticipantsView = () => (
-    <div className="bg-base-100 min-h-full">
+    <div className="bg-base-100 min-h-full w-full">
       {/* Search bar */}
       <div className="sticky top-0 bg-base-100 z-30 p-4 border-b border-base-200">
         <div className="relative">
@@ -233,66 +262,90 @@ const MobileCategoryViews = ({
             placeholder="Search participants..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-base-200 border border-base-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+            className="w-full pl-10 pr-4 py-3 bg-base-200 border border-base-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
           />
         </div>
       </div>
 
       {/* Participants list */}
-      <div className="divide-y divide-base-200">
+      <div className="p-4 space-y-3">
         {enhancedParticipants.length === 0 ? (
-          <div className="p-8 text-center text-base-content/60">
-            <UserPlusIcon className="w-12 h-12 mx-auto mb-3 opacity-50" />
-            <p>No new participants found</p>
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="w-20 h-20 bg-base-200 rounded-full flex items-center justify-center mb-4">
+              <UserPlusIcon className="w-10 h-10 text-base-content/40" />
+            </div>
+            <h3 className="text-lg font-semibold text-base-content/80 mb-1">No new participants</h3>
+            <p className="text-sm text-base-content/60">Check back later for new language partners!</p>
           </div>
         ) : (
           enhancedParticipants.map((user) => {
             const hasRequestBeenSent = outgoingRequestsIds.has(user._id);
             
             return (
-              <div key={user._id} className="p-4 hover:bg-base-200 transition-colors">
-                <div className="flex items-center gap-3">
+              <div key={user._id} className="bg-base-200 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all duration-200">
+                <div className="flex items-start gap-4">
                   <div className="relative flex-shrink-0">
-                    <div className="w-12 h-12 rounded-full overflow-hidden bg-base-300">
+                    <div className="w-16 h-16 rounded-2xl overflow-hidden bg-base-300 ring-2 ring-base-100">
                       <img src={user.profilePic} alt={user.fullName} className="w-full h-full object-cover" />
                     </div>
                     <span 
-                      className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-base-100 ${
-                        onlineMap?.[user._id] ? "bg-success" : "bg-neutral-500"
+                      className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-3 border-base-200 ${
+                        onlineMap?.[user._id] ? "bg-success" : "bg-neutral-400"
                       }`}
                       title={onlineMap?.[user._id] ? "Online" : "Offline"}
                     />
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold truncate">{user.fullName}</h3>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs text-base-content/70">
-                        {getCountryFlag(user.country)} {capitialize(user.country || "")}
-                      </span>
-                      <span className="text-xs text-base-content/70">
-                        Language: {capitialize(user.nativeLanguage || "")}
-                      </span>
+                    <h3 className="font-bold text-lg text-base-content mb-2">{user.fullName}</h3>
+                    
+                    <div className="space-y-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-base-content/70">Country:</span>
+                        <span className="text-sm text-base-content">
+                          {getCountryFlag(user.country)} {capitialize(user.country || "Unknown")}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-base-content/70">Language:</span>
+                        <span className="text-sm text-base-content">
+                          {capitialize(user.nativeLanguage || "Not specified")}
+                        </span>
+                      </div>
+                      {user.gender && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-base-content/70">Gender:</span>
+                          <span className="text-sm text-base-content">{capitialize(user.gender)}</span>
+                        </div>
+                      )}
                     </div>
-                  </div>
 
-                  <button
-                    className={`btn btn-sm ${hasRequestBeenSent ? "btn-outline" : "btn-primary"}`}
-                    onClick={() => {
-                      if (hasRequestBeenSent) cancelRequestMutation(user._id);
-                      else sendRequestMutation(user._id);
-                    }}
-                  >
-                    {hasRequestBeenSent ? (
-                      <>
-                        <XIcon className="w-4 h-4" />
-                      </>
-                    ) : (
-                      <>
-                        <UserPlusIcon className="w-4 h-4" />
-                      </>
+                    {user.bio && (
+                      <div className="mb-3">
+                        <p className="text-sm text-base-content/70 line-clamp-2">{user.bio}</p>
+                      </div>
                     )}
-                  </button>
+
+                    <button
+                      className={`w-full btn ${hasRequestBeenSent ? "btn-outline" : "btn-primary"} rounded-xl font-medium`}
+                      onClick={() => {
+                        if (hasRequestBeenSent) cancelRequestMutation(user._id);
+                        else sendRequestMutation(user._id);
+                      }}
+                    >
+                      {hasRequestBeenSent ? (
+                        <>
+                          <XIcon className="w-4 h-4 mr-2" />
+                          Cancel Request
+                        </>
+                      ) : (
+                        <>
+                          <UserPlusIcon className="w-4 h-4 mr-2" />
+                          Send Friend Request
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             );

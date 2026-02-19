@@ -203,7 +203,7 @@ const SupportedLanguagesDropdown = ({ onLanguageSelect, currentLanguage, savingL
       </button>
 
       {isOpen && (
-        <div className="absolute top-full mt-2 right-0 w-96 bg-black border border-gray-700 rounded-lg shadow-2xl z-50 max-h-96 overflow-hidden">
+        <div className="absolute top-full mt-2 left-0 right-0 w-full bg-black border border-gray-700 rounded-lg shadow-2xl z-50 max-h-96 overflow-hidden">
           {/* Search Bar with Count */}
           <div className="p-3 border-b border-gray-700">
             <div className="flex items-center gap-2">
@@ -258,9 +258,9 @@ const SupportedLanguagesDropdown = ({ onLanguageSelect, currentLanguage, savingL
                           isActive ? 'bg-blue-900 text-white' : 'text-gray-200'
                         } ${savingLanguage ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm truncate pr-2">{lang.name}</span>
-                          <span className="text-xs text-gray-400 whitespace-nowrap">{lang.code}</span>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-sm font-medium">{lang.name}</span>
+                          <span className="text-xs text-gray-400">{lang.code}</span>
                         </div>
                       </button>
                     );
@@ -295,9 +295,9 @@ const SupportedLanguagesDropdown = ({ onLanguageSelect, currentLanguage, savingL
                           isActive ? 'bg-blue-900 text-white' : 'text-gray-200'
                         } ${savingLanguage ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm truncate pr-2">{lang.name}</span>
-                          <span className="text-xs text-gray-400 whitespace-nowrap">{lang.code}</span>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-sm font-medium">{lang.name}</span>
+                          <span className="text-xs text-gray-400">{lang.code}</span>
                         </div>
                       </button>
                     );
