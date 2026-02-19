@@ -18,6 +18,8 @@ import { capitialize } from "../lib/utils";
 import FriendCard, { getCountryFlag, getLanguageFlag } from "../components/FriendCard";
 import NoFriendsFound from "../components/NoFriendsFound";
 import SupportedLanguagesDropdown from "../components/SupportedLanguagesDropdown";
+import MobileNavigationTabs from "../components/MobileNavigationTabs";
+import MobileCategoryViews from "../components/MobileCategoryViews";
 import { useStreamChat } from "../context/StreamChatContext";
 import useAuthUser from "../hooks/useAuthUser";
 import toast from "react-hot-toast";
@@ -29,6 +31,7 @@ const HomePage = () => {
   const [outgoingRequestsIds, setOutgoingRequestsIds] = useState(new Set());
   const [messageCounts, setMessageCounts] = useState({});
   const [recentlyAdded, setRecentlyAdded] = useState([]);
+  const [activeMobileTab, setActiveMobileTab] = useState('friends');
 
   const { data: friends = [], isLoading: loadingFriends } = useQuery({
     queryKey: ["friends"],
@@ -145,28 +148,59 @@ const HomePage = () => {
   return (
     <div className="p-4 sm:p-6 lg:p-8 bg-base-100 min-h-full">
       <div className="container mx-auto space-y-10">
-        {/* FREQUENTLY CONTACTED */}
-        {frequentContacts.length > 0 && (
-          <section className="space-y-4">
-            <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Frequently Contacted</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {frequentContacts.map((friend) => (
-                <FriendCard key={friend._id} friend={friend} onMessage={bumpMessageCount} />
-              ))}
-            </div>
-          </section>
-        )}
+        {/* Mobile Navigation Tabs - Only visible on mobile */}
+        <div className="lg:hidden">
+          <MobileNavigationTabs 
+            activeTab={activeMobileTab} 
+            onTabChange={setActiveMobileTab}
+          />
+        </div>
 
-        {/* YOUR FRIENDS HEADER */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Your Friends</h2>
+        {/* Mobile Category Views - Only visible on mobile */}
+        <div className="lg:hidden">
+          <MobileCategoryViews
+            activeTab={activeMobileTab}
+            friends={friends}
+            frequentContacts={frequentContacts}
+            recommendedUsers={recommendedUsers}
+            friendRequests={friendRequests}
+            outgoingRequestsIds={outgoingRequestsIds}
+            onlineMap={onlineMap}
+            authUser={authUser}
+            bumpMessageCount={bumpMessageCount}
+            sendRequestMutation={sendRequestMutation}
+            cancelRequestMutation={cancelRequestMutation}
+            acceptRequestMutation={acceptRequestMutation}
+            recentlyAddedFriends={recentlyAddedFriends}
+            savingLanguage={savingLanguage}
+            saveLanguageMutation={saveLanguageMutation}
+          />
+        </div>
 
-          <div className="flex items-center gap-3">
-            <SupportedLanguagesDropdown
-              onLanguageSelect={saveLanguageMutation}
-              currentLanguage={authUser?.nativeLanguage}
-              savingLanguage={savingLanguage}
-            />
+        {/* Desktop View - Only visible on desktop and larger */}
+        <div className="hidden lg:block">
+          {/* FREQUENTLY CONTACTED */}
+          {frequentContacts.length > 0 && (
+            <section className="space-y-4">
+              <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Frequently Contacted</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {frequentContacts.map((friend) => (
+                  <FriendCard key={friend._id} friend={friend} onMessage={bumpMessageCount} />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* YOUR FRIENDS HEADER */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Your Friends</h2>
+
+            <div className="flex items-center gap-3">
+              <SupportedLanguagesDropdown
+                onLanguageSelect={saveLanguageMutation}
+                currentLanguage={authUser?.nativeLanguage}
+                savingLanguage={savingLanguage}
+              />
 
             <div className="dropdown dropdown-end">
               <div tabIndex={0} role="button" className="btn btn-outline btn-sm">
@@ -409,6 +443,7 @@ const HomePage = () => {
             </div>
           </div>
         </dialog>
+        </div>
       </div>
     </div>
   );
