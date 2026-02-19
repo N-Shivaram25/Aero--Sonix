@@ -74,7 +74,7 @@ const Sidebar = ({ collapsed = false, onToggleCollapsed }) => {
 
   return (
     <aside
-      className={`${collapsed ? "w-20" : "w-72"} bg-base-200 border-r border-base-300 flex flex-col min-h-full transition-[width] duration-200`}
+      className={`${collapsed ? "w-20" : "w-80"} bg-base-200 border-r border-base-300 flex flex-col min-h-full transition-[width] duration-200`}
     >
       <div className="p-5 border-b border-base-300">
         <div className="flex items-center justify-between gap-2">

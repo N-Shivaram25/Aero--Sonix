@@ -1,9 +1,10 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { SearchIcon, GlobeIcon, ChevronDownIcon } from "lucide-react";
 
 const SupportedLanguagesDropdown = ({ onLanguageSelect, currentLanguage, savingLanguage }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const dropdownRef = useRef(null);
 
   // Nova 3 supported languages
   const nova3Languages = [
@@ -164,6 +165,24 @@ const SupportedLanguagesDropdown = ({ onLanguageSelect, currentLanguage, savingL
 
   const allLanguages = [...nova3Languages, ...nova2Languages];
 
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+        setSearchTerm("");
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen]);
+
   const handleLanguageSelect = (code) => {
     if (onLanguageSelect) {
       onLanguageSelect(code);
@@ -173,32 +192,34 @@ const SupportedLanguagesDropdown = ({ onLanguageSelect, currentLanguage, savingL
   };
 
   return (
-    <div className="relative">
+    <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="btn btn-outline btn-sm flex items-center gap-2 bg-black text-white border-gray-600 hover:bg-gray-900 hover:border-gray-500 transition-colors"
+        className="btn btn-outline btn-sm flex items-center gap-2"
       >
         <GlobeIcon className="w-4 h-4" />
         Supported Languages
         <ChevronDownIcon className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-        <span className="badge badge-primary badge-sm ml-1 bg-blue-600 text-white border-blue-600">
-          {allLanguages.length}
-        </span>
       </button>
 
       {isOpen && (
         <div className="absolute top-full mt-2 right-0 w-96 bg-black border border-gray-700 rounded-lg shadow-2xl z-50 max-h-96 overflow-hidden">
-          {/* Search Bar */}
+          {/* Search Bar with Count */}
           <div className="p-3 border-b border-gray-700">
-            <div className="relative">
-              <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search languages..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 bg-gray-900 text-white border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-400"
-              />
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search languages..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-gray-900 text-white border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-400"
+                />
+              </div>
+              <div className="bg-gray-800 px-3 py-2 rounded-md border border-gray-600">
+                <span className="text-xs text-gray-400">{allLanguages.length} languages</span>
+              </div>
             </div>
           </div>
 
@@ -289,7 +310,7 @@ const SupportedLanguagesDropdown = ({ onLanguageSelect, currentLanguage, savingL
           {/* Footer */}
           <div className="px-3 py-2 bg-gray-900 border-t border-gray-700">
             <div className="text-xs text-gray-400 text-center">
-              {allLanguages.length} languages supported across Nova 2 & Nova 3
+              Nova 2 & Nova 3 models available
             </div>
           </div>
         </div>
