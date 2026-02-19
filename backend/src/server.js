@@ -538,42 +538,66 @@ const setupGoogleCloudWsProxy = (server) => {
       if (closed) return;
       
       try {
-        // Handle binary audio data - write directly to stream
-        if (chunk instanceof Buffer) {
+        const asText = (() => {
           try {
-            if (dgConn?.readyState === WebSocket.OPEN) {
-              dgConn.send(chunk);
-            }
+            if (typeof chunk === "string") return chunk;
+            if (Buffer.isBuffer(chunk)) return chunk.toString("utf8");
+            return "";
           } catch {
+            return "";
           }
-        }
-        
-        // Handle text messages (like request_peers)
-        if (typeof chunk === 'string') {
+        })();
+
+        const looksLikeJson = (() => {
+          const t = String(asText || "").trim();
+          if (!t) return false;
+          return t[0] === "{" || t[0] === "[";
+        })();
+
+        if (looksLikeJson) {
           try {
-            const message = JSON.parse(chunk);
-            if (message.type === 'request_peers') {
-              // Send current room participants to the requesting client
+            const message = JSON.parse(String(asText || ""));
+
+            if (message.type === "request_peers") {
               const currentRoom = getRoom(callId);
               if (currentRoom) {
                 for (const [, peer] of currentRoom.entries()) {
                   if (peer.userId !== myUserId) {
                     try {
-                      clientWs.send(JSON.stringify({
-                        type: "peer",
-                        userId: peer.userId,
-                        fullName: peer.fullName,
-                        nativeLanguage: peer.nativeLanguage,
-                      }));
+                      clientWs.send(
+                        JSON.stringify({
+                          type: "peer",
+                          userId: peer.userId,
+                          fullName: peer.fullName,
+                          nativeLanguage: peer.nativeLanguage,
+                        })
+                      );
                     } catch (error) {
-                      console.error('[DeepgramProxy] Error sending peer info:', error);
+                      console.error("[DeepgramProxy] Error sending peer info:", error);
                     }
                   }
                 }
               }
+              return;
             }
-          } catch (parseError) {
-            // Ignore JSON parse errors for binary data
+
+            if (message.type === "ping") {
+              try {
+                clientWs.send(JSON.stringify({ type: "pong", ts: Date.now() }));
+              } catch {
+              }
+              return;
+            }
+          } catch {
+            // Fall through: if parsing fails, treat as audio.
+          }
+        }
+
+        // Treat as raw audio bytes.
+        if (Buffer.isBuffer(chunk)) {
+          try {
+            if (dgConn?.readyState === WebSocket.OPEN) dgConn.send(chunk);
+          } catch {
           }
         }
       } catch (error) {

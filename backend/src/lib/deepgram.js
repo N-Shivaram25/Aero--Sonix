@@ -59,11 +59,11 @@ export const createDeepgramConnection = ({ language }) => {
   url.searchParams.set("smart_format", "true");
   url.searchParams.set("punctuate", "true");
   // A slightly longer endpointing produces more natural sentence boundaries.
-  url.searchParams.set("endpointing", "500");
+  url.searchParams.set("endpointing", "700");
   // Ask Deepgram to emit sentence/utterance-level boundaries (best for captions).
   url.searchParams.set("utterances", "true");
   url.searchParams.set("vad_events", "true");
-  url.searchParams.set("utterance_end_ms", "1000");
+  url.searchParams.set("utterance_end_ms", "1200");
   url.searchParams.set("encoding", "linear16");
   url.searchParams.set("sample_rate", "16000");
   url.searchParams.set("channels", "1");

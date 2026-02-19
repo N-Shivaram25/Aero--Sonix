@@ -373,6 +373,8 @@ const CaptionControls = ({
   const lastSttAudioRecoveryAtMsRef = useRef(0);
   const interimRef = useRef("");
   const silenceTimerRef = useRef(null);
+  const keepAliveTimerRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
 
   const ttsQueueRef = useRef([]);
   const ttsPlayingRef = useRef(false);
@@ -785,6 +787,37 @@ const CaptionControls = ({
   };
 
   useEffect(() => {
+    if (!captionsEnabled) return;
+
+    const onVisibilityChange = () => {
+      if (!captionsEnabled) return;
+      if (document.visibilityState !== "visible") return;
+
+      try {
+        const ctx = audioCtxRef.current;
+        if (ctx && ctx.state === "suspended" && typeof ctx.resume === "function") {
+          const p = ctx.resume();
+          if (p && typeof p.catch === "function") p.catch(() => {});
+        }
+      } catch {
+      }
+
+      try {
+        const ws = socketRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          setRestartSeq((v) => v + 1);
+        }
+      } catch {
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [captionsEnabled]);
+
+  useEffect(() => {
     if (!interpretationMode) {
       stopTts();
       return;
@@ -1023,11 +1056,23 @@ const CaptionControls = ({
         micStreamRef.current = stream;
 
         let reconnectAttempts = 0;
-        const maxReconnectAttempts = 3;
         let fatalWsError = false;
+        let reconnectTimer = null;
+        reconnectTimerRef.current = null;
 
         const connectWebSocket = () => {
-          if (reconnectAttempts >= maxReconnectAttempts || stopped) return;
+          if (stopped) return;
+
+          try {
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+          } catch {
+          }
+
+          try {
+            if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+          } catch {
+          }
+          reconnectTimerRef.current = null;
           
           const newWs = new WebSocket(wsUrl);
           socketRef.current = newWs;
@@ -1036,6 +1081,20 @@ const CaptionControls = ({
             console.log("[Captions] Deepgram WS open");
             reconnectAttempts = 0; // Reset on successful connection
             toast.success("Live captions connected");
+
+            try {
+              if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
+            } catch {
+            }
+            keepAliveTimerRef.current = setInterval(() => {
+              if (stopped) return;
+              const ws = socketRef.current;
+              if (!ws || ws.readyState !== WebSocket.OPEN) return;
+              try {
+                ws.send(JSON.stringify({ type: "ping", ts: Date.now() }));
+              } catch {
+              }
+            }, 15000);
             
             // Request current room participants for instant opponent language
             try {
@@ -1047,6 +1106,12 @@ const CaptionControls = ({
 
           newWs.onclose = (e) => {
             console.warn("[Captions] Deepgram WS closed", { code: e.code, reason: e.reason });
+
+            try {
+              if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
+            } catch {
+            }
+            keepAliveTimerRef.current = null;
             
             // Show appropriate messages based on close code
             if (e?.code === 1000) {
@@ -1058,11 +1123,13 @@ const CaptionControls = ({
             }
             
             // Attempt to reconnect if it's an abnormal closure and we haven't exceeded attempts
-            if (!fatalWsError && e?.code !== 1000 && reconnectAttempts < maxReconnectAttempts && !stopped) {
+            if (!fatalWsError && !stopped) {
               reconnectAttempts++;
-              console.log(`[Captions] Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts})`);
-              toast(`Reconnecting... (${reconnectAttempts}/${maxReconnectAttempts})`);
-              setTimeout(connectWebSocket, 1000 * reconnectAttempts); // Exponential backoff
+              const delayMs = Math.min(10000, 500 * Math.pow(2, Math.min(reconnectAttempts, 6)));
+              console.log(`[Captions] Attempting to reconnect (#${reconnectAttempts}) in ${delayMs}ms`);
+              toast(`Reconnecting... (${reconnectAttempts})`);
+              reconnectTimer = setTimeout(connectWebSocket, delayMs);
+              reconnectTimerRef.current = reconnectTimer;
             }
           };
 
@@ -1153,11 +1220,11 @@ const CaptionControls = ({
             const stability = Number.isFinite(data?.stability) ? Number(data.stability) : 0;
             const confidence = Number.isFinite(data?.confidence) ? Number(data.confidence) : stability;
 
-            const MIN_INTERIM_STABILITY = 0.85;
-            const MIN_FINAL_CONFIDENCE = 0.6;
+            const MIN_INTERIM_STABILITY = 0.7;
+            const MIN_FINAL_CONFIDENCE = 0.5;
 
-            if (!isFinal && stability < MIN_INTERIM_STABILITY) return;
-            if (isFinal && confidence < MIN_FINAL_CONFIDENCE) return;
+            if (!isFinal && stability > 0 && stability < MIN_INTERIM_STABILITY) return;
+            if (isFinal && confidence > 0 && confidence < MIN_FINAL_CONFIDENCE) return;
             const speakerName = isLocalSpeaker
               ? "You"
               : String(data?.speaker_full_name || data?.speaker || "Speaker");
@@ -1335,14 +1402,18 @@ const CaptionControls = ({
               try {
                 const isUsingStreamTrack = !!trackRef.current && !forceGumForSttRef.current;
                 if (isUsingStreamTrack) {
-                  if (rms < 0.0002) consecutiveSilentFrames += 1;
+                  const trackEnabled = trackRef.current?.enabled !== false;
+                  const trackMuted = trackRef.current?.muted === true;
+                  const allowRecovery = trackEnabled && !trackMuted;
+
+                  if (allowRecovery && rms < 0.00015 && audioChunkCount > 50) consecutiveSilentFrames += 1;
                   else consecutiveSilentFrames = 0;
 
                   // Roughly ~50 logs ~= ~2 seconds, but frame rate depends on buffer size.
-                  if (consecutiveSilentFrames >= 120) {
+                  if (consecutiveSilentFrames >= 300) {
                     const now = Date.now();
                     // Cooldown so we don't restart repeatedly and lose context (hurts accuracy).
-                    if (now - lastSttAudioRecoveryAtMsRef.current >= 15000) {
+                    if (now - lastSttAudioRecoveryAtMsRef.current >= 30000) {
                       lastSttAudioRecoveryAtMsRef.current = now;
                       forceGumForSttRef.current = true;
                       consecutiveSilentFrames = 0;
@@ -1463,6 +1534,18 @@ const CaptionControls = ({
 
     return () => {
       stopped = true;
+
+      try {
+        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      } catch {
+      }
+      reconnectTimerRef.current = null;
+
+      try {
+        if (keepAliveTimerRef.current) clearInterval(keepAliveTimerRef.current);
+      } catch {
+      }
+      keepAliveTimerRef.current = null;
 
       try {
         if (pendingInterimTtsRef.current.timer) clearTimeout(pendingInterimTtsRef.current.timer);
