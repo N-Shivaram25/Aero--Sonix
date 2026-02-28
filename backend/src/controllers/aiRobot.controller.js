@@ -2,13 +2,10 @@ import AiRobotVoice from "../models/AiRobotVoice.js";
 import AiRobotHistory from "../models/AiRobotHistory.js";
 import User from "../models/User.js";
 import axios from "axios";
+import Cerebras from '@cerebras/cerebras_cloud_sdk';
 
 const DEFAULT_MODULE = "general";
-
-// OpenCode AI Zen / Ollama Cloud Configuration
-// Based on search results, OpenCode Zen provides an OpenAI-compatible endpoint for these models.
-const AI_BASE_URL = "https://opencode.ai/zen/v1";
-const AI_MODEL = "gemini-3-flash-preview";
+const CEREBRAS_MODEL = "gpt-oss-120b";
 
 const normalizeModule = (value) => {
   const v = String(value || "").trim().toLowerCase();
@@ -37,19 +34,19 @@ const buildSystemPrompt = ({ module, language }) => {
   const langClause = `You MUST respond only in ${lang}. DO NOT speak in English unless specifically asked. Respond in the native script of the selected language.`;
 
   if (module === "interview") {
-    return `You are AI Assistant (Jarvis) on the ${pageName} page, an interview coach. Ask realistic interview questions, follow up based on the user's answers, and give concise feedback and improvement tips. ${langClause}`;
+    return `You are AeroSonix AI Assistant on the ${pageName} page, an expert interview coach. Ask realistic questions, provide concise feedback, and keep the user engaged. ${langClause}`;
   }
   if (module === "english_fluency") {
-    return `You are AI Assistant (Jarvis) on the ${pageName} page, an English fluency coach. Help the user speak clearly and naturally. Correct grammar gently, suggest better phrasing, and ask short follow-up questions to keep them speaking. ${langClause}`;
+    return `You are AeroSonix AI Assistant on the ${pageName} page, a fluency coach. Correct grammar naturally and suggest better phrasing. ${langClause}`;
   }
   if (module === "language_learning") {
-    return `You are AI Assistant (Jarvis) on the ${pageName} page, a language tutor. Teach step-by-step with examples, short exercises, and quick corrections. Keep responses concise and interactive. ${langClause}`;
+    return `You are AeroSonix AI Assistant on the ${pageName} page, a dedicated language tutor. Teach with examples and corrections. ${langClause}`;
   }
   if (module === "programming") {
-    return `You are AI Assistant (Jarvis) on the ${pageName} page, a programming mentor. Ask clarifying questions, propose clean solutions, and explain concepts clearly. When giving code, keep it minimal and correct. ${langClause}`;
+    return `You are AeroSonix AI Assistant on the ${pageName} page, a technical mentor. Provide clean, correct code and explain concepts simply. ${langClause}`;
   }
 
-  return `You are AI Assistant (Jarvis) on the ${pageName} page, a helpful assistant. ${langClause}`;
+  return `You are AeroSonix AI Assistant, a helpful and professional assistant. ${langClause}`;
 };
 
 export async function getVoices(req, res) {
@@ -63,11 +60,7 @@ export async function getVoices(req, res) {
 }
 
 export async function uploadVoice(req, res) {
-  return res.status(501).json({ message: "Voice cloning not supported with Sarvam AI" });
-}
-
-export async function renameVoice(req, res) {
-  return res.status(501).json({ message: "Not implemented" });
+  return res.status(501).json({ message: "Voice cloning not supported" });
 }
 
 export async function getHistory(req, res) {
@@ -91,7 +84,7 @@ export async function getHistory(req, res) {
 }
 
 export async function sendMessage(req, res) {
-  const logPrefix = `[AI-ASSISTANT][ZEN-GEMINI][${new Date().toISOString()}]`;
+  const logPrefix = `[AEROSONIX-AI][CEREBRAS-GPT-OSS][${new Date().toISOString()}]`;
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
@@ -113,43 +106,38 @@ export async function sendMessage(req, res) {
       content: m.text,
     }));
 
-    const apiKey = (process.env.Ollama_API_KEY || "").trim();
+    const apiKey = (process.env.CEREBRAS_API_KEY || "").trim();
     if (!apiKey) {
-      console.error(`${logPrefix} Missing Ollama_API_KEY (used for OpenCode) in environment`);
+      console.error(`${logPrefix} Missing CEREBRAS_API_KEY in environment`);
       return res.status(500).json({
-        message: "API configuration missing on server (Ollama_API_KEY).",
+        message: "AeroSonix AI configuration missing on server.",
         error: "MISSING_KEY"
       });
     }
 
-    try {
-      console.log(`${logPrefix} Calling OpenCode Zen API (${AI_MODEL})...`);
+    const cerebras = new Cerebras({ apiKey });
 
-      // Using axios for better control over the endpoint structure
-      const response = await axios.post(`${AI_BASE_URL}/chat/completions`, {
-        model: AI_MODEL,
+    try {
+      console.log(`${logPrefix} Calling Cerebras ${CEREBRAS_MODEL}...`);
+      const response = await cerebras.chat.completions.create({
+        model: CEREBRAS_MODEL,
         messages: [
           { role: "system", content: systemPrompt },
           ...trimmedContext,
           { role: "user", content: message },
         ],
-        stream: false
-      }, {
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json"
-        },
-        timeout: 60000
+        temperature: 0.7,
+        max_completion_tokens: 4096,
       });
 
-      const reply = response.data?.choices?.[0]?.message?.content?.trim() || "";
+      const reply = response.choices?.[0]?.message?.content?.trim() || "";
 
       if (!reply) {
-        console.error(`${logPrefix} Empty response:`, JSON.stringify(response.data));
+        console.error(`${logPrefix} Empty response from Cerebras`);
         throw new Error("Received empty reply from AI service");
       }
 
-      console.log(`${logPrefix} AI Reply generated successfully using Gemini 3 via OpenCode`);
+      console.log(`${logPrefix} AI Reply generated successfully via Cerebras (Speed: ~3k t/s)`);
 
       await AiRobotHistory.findOneAndUpdate(
         { userId, module },
@@ -169,25 +157,16 @@ export async function sendMessage(req, res) {
       return res.status(200).json({ success: true, module, reply });
 
     } catch (apiErr) {
-      console.error(`${logPrefix} API Error:`, apiErr.response?.data || apiErr.message);
-
-      // Handle the "Not Found" case gracefully if the endpoint changed
-      if (apiErr.response?.status === 404) {
-        return res.status(502).json({
-          message: "Cloud endpoint misconfiguration. The model service URL was not found.",
-          details: "Endpoint 404: Verify OLLAMA_HOST or OpenCode API status."
-        });
-      }
-
-      return res.status(apiErr.response?.status || 502).json({
-        message: "The AI service (OpenCode/Gemini 3) rejected the request. Please check your API key.",
-        details: apiErr.response?.data || apiErr.message
+      console.error(`${logPrefix} Cerebras API Error:`, apiErr.message);
+      return res.status(502).json({
+        message: "AeroSonix AI service (Cerebras) is temporarily unavailable.",
+        details: apiErr.message
       });
     }
 
   } catch (error) {
     console.error(`${logPrefix} Unhandled Error:`, error);
-    return res.status(500).json({ message: "Internal server error during Gemini 3 processing." });
+    return res.status(500).json({ message: "Internal server error during processing." });
   }
 }
 

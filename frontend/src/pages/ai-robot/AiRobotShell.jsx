@@ -6,11 +6,13 @@ import {
     SendIcon,
     ChevronDownIcon,
     RefreshCcwIcon,
-    Volume2Icon,
     AlertCircleIcon,
     CircleIcon,
     CheckIcon,
-    Loader2Icon
+    Loader2Icon,
+    SparklesIcon,
+    ZapIcon,
+    MicOffIcon
 } from "lucide-react";
 import toast from "react-hot-toast";
 import {
@@ -157,13 +159,12 @@ const AiRobotShell = () => {
         } catch (err) {
             const respData = err.response?.data;
             const errMsg = respData?.message || err.message || "AI service error.";
-            const errDetails = respData?.details?.error?.message || (respData?.details ? JSON.stringify(respData.details) : "");
 
             console.error("Chat error:", err);
-            toast.error(`Jarvis: "${errMsg}"`, { duration: 6000 });
+            toast.error(`AeroSonix: "${errMsg}"`);
             setMessages((prev) => [...prev, {
                 role: "assistant",
-                text: `⚠️ ERROR: ${errMsg} ${errDetails ? `(${errDetails.substring(0, 150)})` : ""}`,
+                text: `⚠️ Error: ${errMsg}`,
                 timestamp: new Date(),
                 isError: true
             }]);
@@ -195,7 +196,7 @@ const AiRobotShell = () => {
     const startListening = async () => {
         try {
             setVoiceState("listening");
-            setInputText(""); // Clear for real-time typing
+            setInputText("");
 
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             streamRef.current = stream;
@@ -217,12 +218,10 @@ const AiRobotShell = () => {
                         handleSend(res.text);
                     } else {
                         setVoiceState("idle");
-                        toast.error("Couldn't hear you clearly.", { duration: 2000 });
+                        toast.error("I couldn't hear you.");
                     }
                 } catch (err) {
                     setVoiceState("error");
-                    setLastError("Transcription failed");
-                    toast.error("Speech service error.");
                     setTimeout(() => setVoiceState("idle"), 2000);
                 }
             };
@@ -244,15 +243,12 @@ const AiRobotShell = () => {
 
                     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
                     silenceTimerRef.current = setTimeout(() => {
-                        console.log("2 seconds silence detected, stopping voice interaction...");
                         if (mediaRecorder.state === "recording") {
                             mediaRecorder.stop();
                             try { recognition.stop(); } catch (e) { }
                         }
                     }, 2000);
                 };
-
-                recognition.onerror = (e) => console.error("SpeechRecognition error:", e);
                 recognition.start();
             }
 
@@ -260,8 +256,7 @@ const AiRobotShell = () => {
 
         } catch (err) {
             setVoiceState("error");
-            setLastError("Microphone access denied");
-            toast.error("Microphone access is required for voice chatting.");
+            toast.error("Microphone access denied.");
             setTimeout(() => setVoiceState("idle"), 3000);
         }
     };
@@ -276,214 +271,213 @@ const AiRobotShell = () => {
     };
 
     return (
-        <div className="flex flex-col h-full bg-gradient-to-br from-[#0f172a] to-[#020617] text-slate-100 overflow-hidden font-sans">
-            {/* Header */}
-            <header className="flex items-center justify-between p-4 bg-white/5 backdrop-blur-md border-b border-white/10 z-10 shadow-2xl shadow-blue-500/5">
-                <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-500/20 rounded-xl border border-blue-500/30 group">
-                        <BotIcon className="size-6 text-blue-400 group-hover:scale-110 transition-transform duration-300" />
+        <div className="flex flex-col h-full bg-slate-950 text-slate-100 overflow-hidden font-sans">
+            {/* Professional Header */}
+            <header className="navbar bg-slate-900/50 backdrop-blur-xl border-b border-white/5 px-6 shrink-0">
+                <div className="flex-1 gap-4">
+                    <div className="avatar placeholder">
+                        <div className="bg-primary/20 text-primary rounded-xl w-10 border border-primary/30 shadow-[0_0_15px_rgba(59,130,246,0.2)]">
+                            <BotIcon className="size-6" />
+                        </div>
                     </div>
                     <div>
-                        <h1 className="text-xl font-bold tracking-tight text-white/90">AI - Assistance</h1>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                            <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-                            <span className="text-[10px] font-medium text-emerald-400/80 uppercase tracking-widest">System Ready</span>
+                        <h1 className="text-lg font-black tracking-tight text-white">AeroSonix <span className="text-primary">Assistant</span></h1>
+                        <div className="flex items-center gap-2">
+                            <div className="badge badge-success badge-xs animate-pulse"></div>
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.1em]">Neural Core Online</span>
                         </div>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-4">
-                    <div className="flex flex-col items-end">
-                        <label className="text-[10px] text-slate-500 uppercase tracking-widest mb-1 font-bold">Voice Language</label>
-                        <div className="dropdown dropdown-end">
-                            <div tabIndex={0} role="button" className="flex items-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-all text-sm group">
-                                {voiceLang.label}
-                                <ChevronDownIcon className="size-3.5 opacity-50 group-hover:translate-y-0.5 transition-transform" />
-                            </div>
-                            <ul tabIndex={0} className="dropdown-content z-[30] menu p-2 shadow-2xl bg-[#0f172a] border border-white/10 rounded-xl w-48 mt-2 max-h-64 overflow-y-auto backdrop-blur-xl">
-                                {VOICE_LANGUAGES.map((l) => (
-                                    <li key={l.code}>
-                                        <button
-                                            onClick={() => setVoiceLang(l)}
-                                            className={`flex items-center justify-between ${voiceLang.code === l.code ? "bg-blue-500/20 text-blue-400" : "hover:bg-white/5"}`}
-                                        >
-                                            {l.label}
-                                            {voiceLang.code === l.code && <CheckIcon className="size-3.5" />}
-                                        </button>
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
+                <div className="flex-none gap-4">
+                    <div className="flex flex-col items-end mr-2">
+                        <span className="text-[9px] font-bold text-slate-600 uppercase mb-1">Inference Engine</span>
+                        <div className="badge badge-outline badge-primary font-mono text-[9px] border-primary/20 bg-primary/5">CEREBRAS GPT-OSS</div>
+                    </div>
+
+                    <div className="dropdown dropdown-end">
+                        <label tabIndex={0} className="btn btn-ghost btn-sm border border-white/10 flex items-center gap-2 text-xs font-bold bg-white/5">
+                            {voiceLang.label} <ChevronDownIcon className="size-3" />
+                        </label>
+                        <ul tabIndex={0} className="dropdown-content z-[30] menu p-2 shadow-2xl bg-slate-900 border border-white/10 rounded-xl w-52 mt-4 max-h-80 overflow-y-auto">
+                            {VOICE_LANGUAGES.map((l) => (
+                                <li key={l.code}>
+                                    <button
+                                        onClick={() => setVoiceLang(l)}
+                                        className={`flex items-center justify-between font-bold py-3 ${voiceLang.code === l.code ? "bg-primary text-white" : "hover:bg-white/5"}`}
+                                    >
+                                        {l.label}
+                                        {voiceLang.code === l.code && <CheckIcon className="size-3.5" />}
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
                     </div>
 
                     <button
-                        onClick={() => { setMessages([]); toast.success("Chat cleared"); }}
-                        className="p-2.5 bg-white/5 hover:bg-red-500/10 border border-white/10 rounded-xl transition-all group shadow-inner"
-                        title="Clear Chat"
+                        onClick={() => { setMessages([]); toast.success("History cleared"); }}
+                        className="btn btn-square btn-sm btn-ghost border border-white/10 hover:bg-error/10 hover:text-error transition-all"
                     >
-                        <RefreshCcwIcon className="size-5 text-slate-500 group-hover:text-red-400 transition-colors group-active:rotate-180 duration-500" />
+                        <RefreshCcwIcon className="size-4" />
                     </button>
                 </div>
             </header>
 
-            {/* Chat Area */}
+            {/* Main Chat Interface - DaisyUI Powered */}
             <main
                 ref={scrollRef}
-                className="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth custom-scrollbar bg-[#020617]"
+                className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 scroll-smooth custom-scrollbar bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-900/50 via-slate-950 to-black"
             >
                 {messages.length === 0 && (
-                    <div className="flex flex-col items-center justify-center h-full opacity-60">
-                        <div className="relative group mb-8">
-                            <div className="absolute inset-0 bg-red-600/20 rounded-full blur-2xl group-hover:bg-red-600/40 transition-all duration-700 animate-pulse" />
-                            <div className="relative p-10 bg-gradient-to-br from-red-900/20 to-black border border-red-500/30 rounded-full shadow-2xl shadow-red-500/10">
-                                <BotIcon className="size-24 text-red-500/80 drop-shadow-[0_0_15px_rgba(239,68,68,0.5)]" />
+                    <div className="flex flex-col items-center justify-center h-full text-center space-y-6">
+                        <div className="relative">
+                            <div className="absolute inset-0 bg-primary/20 blur-[100px] rounded-full"></div>
+                            <div className="relative p-12 bg-slate-900/50 border border-white/10 rounded-[3rem] shadow-3xl">
+                                <SparklesIcon className="size-20 text-primary animate-pulse" />
                             </div>
                         </div>
-                        <h2 className="text-2xl font-black tracking-[0.2em] uppercase text-red-500/90 mb-3 drop-shadow-sm font-mono">AeroSonix AI</h2>
-                        <p className="text-slate-400 font-medium text-center max-w-sm px-6 leading-relaxed italic border-x border-red-500/20 py-2">
-                            "I am AeroSonix Voice Assistant. Initiating encrypted neural link... System online."
-                        </p>
+                        <div className="max-w-md space-y-4">
+                            <h2 className="text-3xl font-black text-white tracking-widest uppercase">System Initialization</h2>
+                            <p className="text-slate-400 font-medium italic leading-relaxed">
+                                "I am AeroSonix Voice Assistant. Neural link established. How can I assist you in your mission today?"
+                            </p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 w-full max-w-sm mt-8">
+                            <div className="p-4 bg-white/5 rounded-2xl border border-white/5 text-[10px] font-bold text-slate-500 text-center uppercase tracking-widest">Low Latency Core</div>
+                            <div className="p-4 bg-white/5 rounded-2xl border border-white/5 text-[10px] font-bold text-slate-500 text-center uppercase tracking-widest">GPT-OSS Inference</div>
+                        </div>
                     </div>
                 )}
 
                 {messages.map((m, i) => (
                     <div
                         key={i}
-                        className={`chat ${m.role === "user" ? "chat-end" : "chat-start"} animate-in fade-in slide-in-from-bottom-2 duration-300`}
+                        className={`chat ${m.role === "user" ? "chat-end" : "chat-start"} group animate-in fade-in slide-in-from-bottom-4 duration-500`}
                     >
                         <div className="chat-image avatar">
-                            <div className="w-10 rounded-full border border-white/10 p-1.5 bg-black/40 backdrop-blur-md">
-                                {m.role === "user" ? (
-                                    <div className="size-full bg-blue-500 rounded-full" />
-                                ) : (
-                                    <BotIcon className={`size-full ${m.isError ? "text-red-500" : "text-red-500"}`} />
-                                )}
+                            <div className={`w-10 rounded-2xl p-2 shadow-2xl ${m.role === 'user' ? 'bg-indigo-600' : 'bg-slate-800'}`}>
+                                {m.role === "user" ? <CircleIcon className="size-full text-white" /> : <BotIcon className="size-full text-primary" />}
                             </div>
                         </div>
-                        <div className="chat-header opacity-50 text-[10px] font-mono mb-1 uppercase tracking-tighter">
-                            {m.role === "user" ? "User" : "Assistant"}
+                        <div className="chat-header opacity-50 text-[10px] font-black uppercase mb-1 tracking-tighter">
+                            {m.role === "user" ? "System User" : "AeroSonix Assistant"}
                             <time className="text-[10px] opacity-30 ml-2">
                                 {m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""}
                             </time>
                         </div>
                         <div
-                            className={`chat-bubble text-sm font-medium leading-relaxed border-0 shadow-2xl
-                            ${m.role === "user"
-                                    ? "bg-gradient-to-r from-blue-700 to-indigo-800 text-white"
+                            className={`chat-bubble text-sm md:text-[15px] font-medium leading-relaxed border-0 shadow-xl py-4 px-6
+                                ${m.role === "user"
+                                    ? "bg-indigo-600 text-white rounded-tr-none"
                                     : m.isError
-                                        ? "bg-red-950/30 text-red-400 border border-red-900/50 italic"
-                                        : "bg-slate-900/90 text-slate-100 border border-white/5"}
+                                        ? "bg-rose-950/40 text-rose-400 border border-rose-900/50 italic"
+                                        : "bg-slate-800/80 backdrop-blur-md text-slate-100 rounded-tl-none border border-white/5"}
                         `}
                         >
                             {m.text}
                         </div>
-                        {m.role === "assistant" && !m.isError && (
-                            <div className="chat-footer opacity-50 mt-1">
-                                <span className="text-[9px] uppercase tracking-widest text-red-500/70 font-black">Neural Processing Complete</span>
-                            </div>
-                        )}
                     </div>
                 ))}
 
                 {isTyping && (
-                    <div className="chat chat-start animate-in fade-in duration-200">
-                        <div className="chat-bubble bg-black/40 border border-red-500/20 backdrop-blur-md flex items-center gap-4 py-3 px-5 shadow-inner">
-                            <div className="flex gap-1.5">
-                                <span className="size-2 bg-red-600 rounded-full animate-bounce [animation-delay:-0.3s] shadow-[0_0_8px_#dc2626]" />
-                                <span className="size-2 bg-red-600 rounded-full animate-bounce [animation-delay:-0.15s] shadow-[0_0_8px_#dc2626]" />
-                                <span className="size-2 bg-red-600 rounded-full animate-bounce shadow-[0_0_8px_#dc2626]" />
+                    <div className="chat chat-start">
+                        <div className="chat-image avatar">
+                            <div className="w-10 rounded-2xl p-2 bg-slate-800 animate-pulse">
+                                <BotIcon className="size-full text-primary" />
                             </div>
-                            <span className="text-[10px] text-red-500/80 font-black uppercase tracking-[0.2em] font-mono">Syncing Neural Data...</span>
+                        </div>
+                        <div className="chat-bubble bg-slate-800/40 border border-primary/20 backdrop-blur-md flex items-center gap-4 py-4 px-6 rounded-tl-none ring-1 ring-primary/10">
+                            <div className="flex gap-1.5 items-center">
+                                <span className="size-2 bg-primary rounded-full animate-bounce [animation-delay:-0.3s]" />
+                                <span className="size-2 bg-primary rounded-full animate-bounce [animation-delay:-0.15s]" />
+                                <span className="size-2 bg-primary rounded-full animate-bounce" />
+                            </div>
+                            <span className="text-[11px] text-primary font-black uppercase tracking-[0.2em] font-mono">Inference Active...</span>
                         </div>
                     </div>
                 )}
             </main>
 
-            {/* Bottom Interface */}
-            <footer className="p-6 bg-[#020617] border-t border-white/5 space-y-4 shadow-[0_-20px_50px_rgba(0,0,0,0.8)]">
+            {/* Professional Footer Interface */}
+            <footer className="p-6 md:p-8 bg-slate-900 border-t border-white/5 space-y-6">
                 {translatedPreview && (
-                    <div className="alert bg-red-900/10 border border-red-500/20 rounded-2xl animate-in slide-in-from-bottom-2 duration-300">
-                        <div className="flex flex-col items-start gap-1">
+                    <div className="alert bg-primary/10 border-primary/20 rounded-2xl py-3 animate-in slide-in-from-bottom-2 duration-300">
+                        <div className="flex flex-col items-start gap-1 w-full">
                             <div className="flex items-center gap-2 mb-1">
-                                <Loader2Icon className="size-3 text-red-500 animate-spin" />
-                                <span className="text-[9px] uppercase tracking-[0.2em] text-red-500 font-black">Voice Translation Realtime</span>
+                                <ZapIcon className="size-3 text-primary" />
+                                <span className="text-[10px] font-black uppercase tracking-widest text-primary/80">Real-time Neural Translation</span>
                             </div>
-                            <p className="text-sm text-slate-300 font-medium italic">"{translatedPreview}"</p>
+                            <p className="text-sm text-slate-200 font-semibold italic">"{translatedPreview}"</p>
                         </div>
                     </div>
                 )}
 
                 <div className="flex items-center gap-6">
-                    {/* RED JARVIS MIC BUTTON */}
-                    <div className="relative group shrink-0">
+                    {/* Professional Voice Interface */}
+                    <div className="relative group flex items-center justify-center">
                         {voiceState === "listening" && (
-                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-                                <div className="size-24 bg-red-600/30 rounded-full animate-[ping_1.5s_linear_infinite] blur-xl" />
-                                <div className="size-28 bg-red-600/20 rounded-full animate-[ping_2s_linear_infinite] [animation-delay:0.5s] blur-2xl" />
-                                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 size-20 border-2 border-red-500/50 rounded-full animate-[spin_3s_linear_infinite] border-dashed" />
+                            <div className="absolute pointer-events-none">
+                                <div className="size-24 bg-primary/30 rounded-full animate-[ping_2s_linear_infinite] blur-2xl" />
+                                <div className="size-28 bg-primary/20 rounded-full animate-[ping_3s_linear_infinite] [animation-delay:1s] blur-3xl" />
                             </div>
                         )}
 
                         <button
                             onClick={handleMicClick}
-                            className={`relative z-10 size-16 rounded-full flex items-center justify-center transition-all duration-700 shadow-2xl transform active:scale-95
-                                ${voiceState === "idle" ? "bg-black text-red-500 border border-red-500/30 hover:border-red-500 hover:shadow-red-500/20" : ""}
-                                ${voiceState === "listening" ? "bg-red-600 text-white border-white/40 ring-offset-4 ring-offset-[#020617] ring-4 ring-red-600 shadow-[0_0_50px_rgba(220,38,38,0.5)]" : ""}
-                                ${voiceState === "processing" ? "bg-[#1e1e1e] text-red-400 border border-red-500/20 scale-110" : ""}
-                                ${voiceState === "speaking" ? "bg-red-700 text-white border-red-400 ring-4 ring-red-500/20 shadow-red-500/40 animate-pulse" : ""}
-                                ${voiceState === "error" ? "bg-black text-rose-700 border-rose-900 border-2" : ""}
+                            className={`btn btn-circle btn-lg relative z-10 size-16 md:size-20 transition-all duration-500 border-none
+                                ${voiceState === "idle" ? "bg-slate-800 text-slate-400 hover:bg-primary/20 hover:text-primary shadow-xl" : ""}
+                                ${voiceState === "listening" ? "bg-primary text-white shadow-[0_0_50px_rgba(59,130,246,0.6)]" : ""}
+                                ${voiceState === "processing" ? "bg-slate-700 text-slate-100" : ""}
+                                ${voiceState === "speaking" ? "bg-cyan-500 text-white shadow-[0_0_30px_rgba(6,182,212,0.4)]" : ""}
+                                ${voiceState === "error" ? "bg-rose-600 text-white" : ""}
                             `}
                         >
-                            {voiceState === "idle" && <MicIcon className="size-7 drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]" />}
-                            {voiceState === "listening" && <CircleIcon className="size-8 fill-current animate-pulse" />}
-                            {voiceState === "processing" && <RefreshCcwIcon className="size-8 animate-spin" />}
+                            {voiceState === "idle" && <MicIcon className="size-8" />}
+                            {voiceState === "listening" && <CircleIcon className="size-9 fill-current animate-pulse" />}
+                            {voiceState === "processing" && <Loader2Icon className="size-9 animate-spin" />}
                             {voiceState === "speaking" && (
-                                <div className="flex items-end gap-1 h-7">
-                                    <div className="w-1.5 bg-white animate-[equalizer_0.7s_ease_infinite] h-2 rounded-full shadow-[0_0_5px_white]" />
-                                    <div className="w-1.5 bg-white animate-[equalizer_0.5s_ease_infinite] h-5 rounded-full shadow-[0_0_5px_white]" />
-                                    <div className="w-1.5 bg-white animate-[equalizer_0.8s_ease_infinite] h-full rounded-full shadow-[0_0_5px_white]" />
-                                    <div className="w-1.5 bg-white animate-[equalizer_0.6s_ease_infinite] h-4 rounded-full shadow-[0_0_5px_white]" />
+                                <div className="flex items-end gap-1.5 h-8">
+                                    <div className="w-2 bg-white animate-[equalizer_0.7s_ease_infinite] h-2 rounded-full shadow-[0_0_10px_white]" />
+                                    <div className="w-2 bg-white animate-[equalizer_0.5s_ease_infinite] h-6 rounded-full shadow-[0_0_10px_white]" />
+                                    <div className="w-2 bg-white animate-[equalizer_0.8s_ease_infinite] h-full rounded-full shadow-[0_0_10px_white]" />
+                                    <div className="w-2 bg-white animate-[equalizer_0.6s_ease_infinite] h-4 rounded-full shadow-[0_0_10px_white]" />
                                 </div>
                             )}
-                            {voiceState === "error" && <AlertCircleIcon className="size-8" />}
+                            {voiceState === "error" && <AlertCircleIcon className="size-9" />}
                         </button>
 
-                        <div className="absolute -top-12 left-1/2 -translate-x-1/2 pointer-events-none">
-                            <span className={`px-3 py-1 bg-red-600 text-white text-[10px] rounded-md font-black uppercase tracking-[0.2em] transition-all duration-500 shadow-xl 
-                                ${voiceState === 'idle' ? 'opacity-0 translate-y-2' : 'opacity-100 translate-y-0'}`}>
-                                {voiceState === 'listening' ? 'Listening' : voiceState === 'processing' ? 'Analysing' : voiceState === 'speaking' ? 'Assistant Speaking' : voiceState}
-                            </span>
+                        <div className="absolute -top-14 left-1/2 -translate-x-1/2 text-center pointer-events-none">
+                            <div className={`transition-all duration-500 flex flex-col items-center ${voiceState === 'idle' ? 'opacity-0 translate-y-4' : 'opacity-100 translate-y-0'}`}>
+                                <span className="badge badge-primary font-black uppercase tracking-widest text-[10px] py-2 px-3 shadow-xl">
+                                    {voiceState === 'listening' ? 'Analyzing Audio' : voiceState === 'processing' ? 'Thinking' : voiceState === 'speaking' ? 'Voicing Output' : voiceState}
+                                </span>
+                            </div>
                         </div>
                     </div>
 
-                    {/* Text Input Block */}
-                    <div className="flex-1 flex items-center bg-white/5 border border-white/10 rounded-3xl px-5 py-2.5 transition-all focus-within:border-red-500/40 focus-within:bg-white/[0.07] focus-within:shadow-[0_0_30px_rgba(220,38,38,0.08)]">
+                    {/* Integrated Input Section */}
+                    <div className="flex-1 join bg-slate-800/50 border border-white/5 p-1 rounded-full shadow-inner focus-within:border-primary/50 transition-all focus-within:ring-4 ring-primary/10">
                         <input
                             type="text"
                             value={inputText}
                             onChange={(e) => setInputText(e.target.value)}
                             onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                            placeholder={voiceState === 'listening' ? "Voice active..." : "Neural link ready..."}
-                            className={`flex-1 bg-transparent border-none outline-none text-slate-100 placeholder:text-slate-600 py-3 text-sm font-medium ${voiceState === 'listening' ? 'animate-pulse text-red-400 italic' : ''}`}
+                            placeholder={voiceState === 'listening' ? "Voice input active..." : "Type your query here..."}
+                            className="input bg-transparent border-none outline-none focus:outline-none flex-1 text-white placeholder:text-slate-600 px-6 font-medium"
                         />
 
-                        <div className="flex items-center gap-3 pl-5 border-l border-white/10 shrink-0">
-                            <span className="text-[10px] text-slate-600 uppercase tracking-widest font-black hidden sm:block">Translation</span>
+                        <div className="flex items-center h-10 my-auto mx-2 gap-2 border-l border-white/10 px-4">
+                            <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest hidden lg:block">Output Lang</span>
                             <div className="dropdown dropdown-top dropdown-end">
-                                <div tabIndex={0} role="button" className="flex items-center gap-2 px-3 py-2 bg-white/5 hover:bg-white/10 rounded-xl transition-all text-[11px] border border-white/10 group font-bold">
-                                    {transLang ? transLang.label : "None"}
-                                    <ChevronDownIcon className="size-3 text-slate-500 group-hover:translate-y-0.5 transition-transform" />
-                                </div>
-                                <ul tabIndex={0} className="dropdown-content z-[30] menu p-2 shadow-2xl bg-[#0f172a] border border-white/10 rounded-2xl w-44 mb-3 max-h-60 overflow-y-auto backdrop-blur-2xl">
-                                    <li>
-                                        <button onClick={() => setTransLang(null)} className={`text-[11px] font-bold ${!transLang ? "bg-red-500/20 text-red-500" : "hover:bg-white/5"}`}>
-                                            None
-                                        </button>
-                                    </li>
-                                    <div className="h-px bg-white/5 my-1" />
+                                <label tabIndex={0} className="btn btn-ghost btn-xs text-[10px] font-bold text-slate-400 hover:text-primary">
+                                    {transLang ? transLang.label : "Native"} <ChevronDownIcon className="size-2.5" />
+                                </label>
+                                <ul tabIndex={0} className="dropdown-content z-[30] menu p-2 shadow-2xl bg-slate-900 border border-white/10 rounded-xl w-40 mb-3 max-h-60 overflow-y-auto">
+                                    <li><button onClick={() => setTransLang(null)} className="text-[10px] font-bold py-3 hover:bg-white/5">Auto (Native)</button></li>
+                                    <div className="divider my-0 opacity-10"></div>
                                     {TRANSLATION_LANGUAGES.map((l) => (
                                         <li key={l.code}>
-                                            <button onClick={() => setTransLang(l)} className={`text-[11px] font-bold ${transLang?.code === l.code ? "bg-red-500/20 text-red-500" : "hover:bg-white/5"}`}>
+                                            <button onClick={() => setTransLang(l)} className={`text-[10px] font-bold py-3 ${transLang?.code === l.code ? "text-primary" : "hover:bg-white/5"}`}>
                                                 {l.label}
                                             </button>
                                         </li>
@@ -494,10 +488,10 @@ const AiRobotShell = () => {
 
                         <button
                             onClick={() => handleSend()}
-                            disabled={!inputText.trim()}
-                            className="ml-5 p-3.5 bg-red-600 hover:bg-red-500 disabled:opacity-20 disabled:grayscale text-white rounded-2xl transition-all shadow-xl shadow-red-600/20 active:scale-95"
+                            disabled={!inputText.trim() || isTyping}
+                            className="btn btn-primary btn-circle group transition-all"
                         >
-                            <SendIcon className="size-5" />
+                            {isTyping ? <Loader2Icon className="size-5 animate-spin" /> : <SendIcon className="size-5 group-hover:translate-x-1 transition-transform" />}
                         </button>
                     </div>
                 </div>
@@ -505,7 +499,7 @@ const AiRobotShell = () => {
 
             <style>{`
                 @keyframes equalizer {
-                  0%, 100% { height: 6px; }
+                  0%, 100% { height: 8px; }
                   50% { height: 100%; }
                 }
                 .custom-scrollbar::-webkit-scrollbar {
@@ -515,16 +509,15 @@ const AiRobotShell = () => {
                   background: transparent;
                 }
                 .custom-scrollbar::-webkit-scrollbar-thumb {
-                  background: rgba(220, 38, 38, 0.1);
+                  background: rgba(59, 130, 246, 0.1);
                   border-radius: 10px;
                 }
                 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-                  background: rgba(220, 38, 38, 0.2);
+                  background: rgba(59, 130, 246, 0.2);
                 }
             `}</style>
         </div>
     );
 };
-
 
 export default AiRobotShell;

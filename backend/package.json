@@ -12,6 +12,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@cerebras/cerebras_cloud_sdk": "^1.64.1",
     "@elevenlabs/elevenlabs-js": "^2.16.0",
     "@openrouter/sdk": "^0.9.11",
     "axios": "^1.13.6",
