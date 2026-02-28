@@ -2,15 +2,13 @@ import AiRobotVoice from "../models/AiRobotVoice.js";
 import AiRobotHistory from "../models/AiRobotHistory.js";
 import User from "../models/User.js";
 import axios from "axios";
+import { Ollama } from "ollama";
 
 const DEFAULT_MODULE = "general";
 
-// NVIDIA Configuration
-const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
-// Primary DeepSeek model slugs for NVIDIA
-const PRIMARY_MODEL = "deepseek-ai/deepseek-v3.2";
-const SECONDARY_MODEL = "deepseek-ai/deepseek-v3";
-const SANITY_CHECK_MODEL = "meta/llama-3.1-8b-instruct"; // Guaranteed model for NIMs
+// Ollama / OpenCode Configuration
+const OLLAMA_HOST = "https://api.opencode.ai/v1"; // Common cloud base for OpenCode Ollama
+const OLLAMA_MODEL = "gemini-3-flash-preview";
 
 const normalizeModule = (value) => {
   const v = String(value || "").trim().toLowerCase();
@@ -93,7 +91,7 @@ export async function getHistory(req, res) {
 }
 
 export async function sendMessage(req, res) {
-  const logPrefix = `[AI-ASSISTANT][NVIDIA-DEEPSEEK][${new Date().toISOString()}]`;
+  const logPrefix = `[AI-ASSISTANT][OLLAMA-GEMINI][${new Date().toISOString()}]`;
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
@@ -104,116 +102,82 @@ export async function sendMessage(req, res) {
     const module = normalizeModule(req.body?.module);
     const language = String(req.body?.language || "English").trim();
 
+    console.log(`${logPrefix} User: ${userId}, Message: "${message}", Language: "${language}"`);
+
     const history = await AiRobotHistory.findOne({ userId, module }).select("messages");
     const priorMessages = Array.isArray(history?.messages) ? history.messages : [];
 
     const systemPrompt = buildSystemPrompt({ module, language });
-    const trimmedContext = priorMessages.slice(-15).map((m) => ({
+    const trimmedContext = priorMessages.slice(-10).map((m) => ({
       role: m.role,
       content: m.text,
     }));
 
-    // Support both keys from .env
-    const apiKey = (process.env.DEEPSEEK_V3_2 || process.env["DEEPSEEK_V3.2"] || "").trim();
-
+    const apiKey = (process.env.Ollama_API_KEY || "").trim();
     if (!apiKey) {
-      console.error(`${logPrefix} Missing NVIDIA/DeepSeek API Key in environment`);
+      console.error(`${logPrefix} Missing Ollama_API_KEY in environment`);
       return res.status(500).json({
-        message: "AI service key (DEEPSEEK_V3_2) is missing on server.",
+        message: "Ollama configuration missing on server.",
         error: "MISSING_KEY"
       });
     }
 
-    const performCall = async (model, useThinking = false) => {
-      const payload = {
-        model: model,
+    // Initialize Ollama with Cloud Host and API Key
+    const ollama = new Ollama({
+      host: OLLAMA_HOST,
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      }
+    });
+
+    try {
+      console.log(`${logPrefix} Calling Ollama ${OLLAMA_MODEL}...`);
+      const response = await ollama.chat({
+        model: OLLAMA_MODEL,
         messages: [
           { role: "system", content: systemPrompt },
           ...trimmedContext,
           { role: "user", content: message },
         ],
-        temperature: 0.7,
-        top_p: 0.9,
-        max_tokens: 4096,
-      };
-
-      if (useThinking) {
-        payload.chat_template_kwargs = { thinking: true };
-      }
-
-      console.log(`${logPrefix} Attempting: ${model} (Thinking: ${useThinking})`);
-
-      return axios.post(`${NVIDIA_BASE_URL}/chat/completions`, payload, {
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        timeout: 90000
+        stream: false
       });
-    };
 
-    let response;
-    try {
-      // Round 1: Primary + Thinking
-      response = await performCall(PRIMARY_MODEL, true);
-    } catch (e1) {
-      console.warn(`${logPrefix} R1 Failed: ${e1.response?.data?.error?.message || e1.message}`);
-      try {
-        // Round 2: Secondary + Thinking
-        response = await performCall(SECONDARY_MODEL, true);
-      } catch (e2) {
-        console.warn(`${logPrefix} R2 Failed: Trying without thinking parameter...`);
-        try {
-          // Round 3: Secondary (No extras)
-          response = await performCall(SECONDARY_MODEL, false);
-        } catch (e3) {
-          console.warn(`${logPrefix} R3 Failed: Trying Sanity Check Model (Llama 8B)...`);
-          try {
-            // Round 4: Sanity Check
-            response = await performCall(SANITY_CHECK_MODEL, false);
-          } catch (e4) {
-            console.error(`${logPrefix} ALL ATTEMPTS FAILED.`);
-            const lastError = e4.response?.data || e4.message;
-            console.error(`${logPrefix} Last Error Content:`, JSON.stringify(lastError));
+      const reply = response.message?.content?.trim() || "";
 
-            return res.status(e4.response?.status || 502).json({
-              message: "The AI service rejected the request. Please verify your NVIDIA API key and account status.",
-              details: lastError
-            });
-          }
-        }
-      }
-    }
+      if (!reply) throw new Error("Empty reply from Ollama service");
 
-    const reply = response.data?.choices?.[0]?.message?.content?.trim() || "";
-    const reasoning = response.data?.choices?.[0]?.message?.reasoning_content;
+      console.log(`${logPrefix} AI Reply generated using Ollama Gemini 3 Flash Preview`);
 
-    if (reasoning) {
-      console.log(`${logPrefix} Reasoning Captured (Partial): ${reasoning.substring(0, 100)}...`);
-    }
-
-    if (!reply) throw new Error("Received empty response from NVIDIA");
-
-    await AiRobotHistory.findOneAndUpdate(
-      { userId, module },
-      {
-        $push: {
-          messages: {
-            $each: [
-              { role: "user", text: message },
-              { role: "assistant", text: reply },
-            ],
+      await AiRobotHistory.findOneAndUpdate(
+        { userId, module },
+        {
+          $push: {
+            messages: {
+              $each: [
+                { role: "user", text: message },
+                { role: "assistant", text: reply },
+              ],
+            },
           },
         },
-      },
-      { upsert: true, new: true }
-    );
+        { upsert: true, new: true }
+      );
 
-    return res.status(200).json({ success: true, module, reply });
+      return res.status(200).json({ success: true, module, reply });
+
+    } catch (apiErr) {
+      console.error(`${logPrefix} Ollama Error:`, apiErr);
+      // Fallback or detailed error
+      return res.status(502).json({
+        message: "Ollama service (Gemini 3) rejected the request. Verify server status.",
+        details: apiErr.message
+      });
+    }
 
   } catch (error) {
-    console.error(`${logPrefix} Controller Overflow:`, error);
-    return res.status(500).json({ message: "Internal Server Emergency Error" });
+    console.error(`${logPrefix} Unhandled Error in sendMessage:`, error);
+    return res.status(500).json({ message: "Internal server error during AI processing." });
   }
 }
 
@@ -293,6 +257,7 @@ export async function tts(req, res) {
     }
     return res.status(500).json({ message: "TTS failed" });
   } catch (error) {
+    console.error("TTS Error:", error.response?.data || error.message);
     return res.status(500).json({ message: "Internal Server Error" });
   }
 }

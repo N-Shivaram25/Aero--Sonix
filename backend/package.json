@@ -23,6 +23,7 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.13.2",
     "multer": "^2.0.2",
+    "ollama": "^0.6.3",
     "openai": "^4.80.1",
     "sarvamai": "^1.1.4",
     "stream-chat": "^8.60.0",
