@@ -2,13 +2,13 @@ import AiRobotVoice from "../models/AiRobotVoice.js";
 import AiRobotHistory from "../models/AiRobotHistory.js";
 import User from "../models/User.js";
 import axios from "axios";
-import { Ollama } from "ollama";
 
 const DEFAULT_MODULE = "general";
 
-// Ollama / OpenCode Configuration
-const OLLAMA_HOST = "https://api.opencode.ai/v1"; // Common cloud base for OpenCode Ollama
-const OLLAMA_MODEL = "gemini-3-flash-preview";
+// OpenCode AI Zen / Ollama Cloud Configuration
+// Based on search results, OpenCode Zen provides an OpenAI-compatible endpoint for these models.
+const AI_BASE_URL = "https://opencode.ai/zen/v1";
+const AI_MODEL = "gemini-3-flash-preview";
 
 const normalizeModule = (value) => {
   const v = String(value || "").trim().toLowerCase();
@@ -91,7 +91,7 @@ export async function getHistory(req, res) {
 }
 
 export async function sendMessage(req, res) {
-  const logPrefix = `[AI-ASSISTANT][OLLAMA-GEMINI][${new Date().toISOString()}]`;
+  const logPrefix = `[AI-ASSISTANT][ZEN-GEMINI][${new Date().toISOString()}]`;
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
@@ -115,39 +115,41 @@ export async function sendMessage(req, res) {
 
     const apiKey = (process.env.Ollama_API_KEY || "").trim();
     if (!apiKey) {
-      console.error(`${logPrefix} Missing Ollama_API_KEY in environment`);
+      console.error(`${logPrefix} Missing Ollama_API_KEY (used for OpenCode) in environment`);
       return res.status(500).json({
-        message: "Ollama configuration missing on server.",
+        message: "API configuration missing on server (Ollama_API_KEY).",
         error: "MISSING_KEY"
       });
     }
 
-    // Initialize Ollama with Cloud Host and API Key
-    const ollama = new Ollama({
-      host: OLLAMA_HOST,
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      }
-    });
-
     try {
-      console.log(`${logPrefix} Calling Ollama ${OLLAMA_MODEL}...`);
-      const response = await ollama.chat({
-        model: OLLAMA_MODEL,
+      console.log(`${logPrefix} Calling OpenCode Zen API (${AI_MODEL})...`);
+
+      // Using axios for better control over the endpoint structure
+      const response = await axios.post(`${AI_BASE_URL}/chat/completions`, {
+        model: AI_MODEL,
         messages: [
           { role: "system", content: systemPrompt },
           ...trimmedContext,
           { role: "user", content: message },
         ],
         stream: false
+      }, {
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        timeout: 60000
       });
 
-      const reply = response.message?.content?.trim() || "";
+      const reply = response.data?.choices?.[0]?.message?.content?.trim() || "";
 
-      if (!reply) throw new Error("Empty reply from Ollama service");
+      if (!reply) {
+        console.error(`${logPrefix} Empty response:`, JSON.stringify(response.data));
+        throw new Error("Received empty reply from AI service");
+      }
 
-      console.log(`${logPrefix} AI Reply generated using Ollama Gemini 3 Flash Preview`);
+      console.log(`${logPrefix} AI Reply generated successfully using Gemini 3 via OpenCode`);
 
       await AiRobotHistory.findOneAndUpdate(
         { userId, module },
@@ -167,17 +169,25 @@ export async function sendMessage(req, res) {
       return res.status(200).json({ success: true, module, reply });
 
     } catch (apiErr) {
-      console.error(`${logPrefix} Ollama Error:`, apiErr);
-      // Fallback or detailed error
-      return res.status(502).json({
-        message: "Ollama service (Gemini 3) rejected the request. Verify server status.",
-        details: apiErr.message
+      console.error(`${logPrefix} API Error:`, apiErr.response?.data || apiErr.message);
+
+      // Handle the "Not Found" case gracefully if the endpoint changed
+      if (apiErr.response?.status === 404) {
+        return res.status(502).json({
+          message: "Cloud endpoint misconfiguration. The model service URL was not found.",
+          details: "Endpoint 404: Verify OLLAMA_HOST or OpenCode API status."
+        });
+      }
+
+      return res.status(apiErr.response?.status || 502).json({
+        message: "The AI service (OpenCode/Gemini 3) rejected the request. Please check your API key.",
+        details: apiErr.response?.data || apiErr.message
       });
     }
 
   } catch (error) {
-    console.error(`${logPrefix} Unhandled Error in sendMessage:`, error);
-    return res.status(500).json({ message: "Internal server error during AI processing." });
+    console.error(`${logPrefix} Unhandled Error:`, error);
+    return res.status(500).json({ message: "Internal server error during Gemini 3 processing." });
   }
 }
 
