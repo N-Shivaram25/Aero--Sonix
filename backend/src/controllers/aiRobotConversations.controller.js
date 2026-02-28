@@ -2,7 +2,7 @@ import AiRobotConversation from "../models/AiRobotConversation.js";
 import Cerebras from '@cerebras/cerebras_cloud_sdk';
 
 const DEFAULT_MODULE = "general";
-const CEREBRAS_MODEL = "gpt-oss-120b";
+const CEREBRAS_MODEL = "llama3.1-8b";
 
 const normalizeModule = (value) => {
   const v = String(value || "").trim().toLowerCase();
