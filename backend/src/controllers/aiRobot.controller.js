@@ -112,36 +112,57 @@ export async function sendMessage(req, res) {
       content: m.text,
     }));
 
-    const apiKey = (process.env.DEEPSEEK_V3_2 || "").trim();
+    // Load API key with support for dots and underscores
+    const apiKey = (process.env.DEEPSEEK_V3_2 || process.env["DEEPSEEK_V3.2"] || "").trim();
     if (!apiKey) {
-      console.error(`${logPrefix} Missing DEEPSEEK_V3_2 in environment`);
+      console.error(`${logPrefix} Missing DEEPSEEK_V3_2 or DEEPSEEK_V3.2 in environment`);
       return res.status(500).json({
         message: "AI service configuration missing on server (DeepSeek Key)",
         error: "MISSING_DEEPSEEK_KEY"
       });
     }
 
-    // Call NVIDIA API for DeepSeek-V3.2
-    try {
-      console.log(`${logPrefix} Calling NVIDIA DeepSeek...`);
-      const response = await axios.post(`${NVIDIA_BASE_URL}/chat/completions`, {
-        model: NVIDIA_MODEL,
+    // Attempt the AI Call with fallback
+    const fetchData = async (targetModel) => {
+      return axios.post(`${NVIDIA_BASE_URL}/chat/completions`, {
+        model: targetModel,
         messages: [
           { role: "system", content: systemPrompt },
           ...trimmedContext,
           { role: "user", content: message },
         ],
-        temperature: 0.6,
-        top_p: 0.95,
-        max_tokens: 4096,
+        temperature: 0.7,
+        top_p: 0.9,
+        max_tokens: 8192, // Increased as per DeepSeek capabilities
         chat_template_kwargs: { thinking: true }
       }, {
         headers: {
           "Authorization": `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        timeout: 60000
+        timeout: 90000 // DeepSeek reasoning models need time
       });
+    };
+
+    try {
+      console.log(`${logPrefix} Calling NVIDIA DeepSeek (${NVIDIA_MODEL})...`);
+      let response;
+      try {
+        response = await fetchData(NVIDIA_MODEL);
+      } catch (e1) {
+        console.warn(`${logPrefix} Model ${NVIDIA_MODEL} failed (502/Error). Trying fallback deepseek-ai/deepseek-v3...`);
+        try {
+          // Try the standard slug without V3.2 suffix
+          response = await fetchData("deepseek-ai/deepseek-v3");
+        } catch (e2) {
+          console.warn(`${logPrefix} Fallback deepseek-ai/deepseek-v3 failed. Trying without thinking parameter...`);
+          // Last ditch: standard call no extras
+          response = await axios.post(`${NVIDIA_BASE_URL}/chat/completions`, {
+            model: "deepseek-ai/deepseek-v3",
+            messages: [{ role: "system", content: systemPrompt }, ...trimmedContext, { role: "user", content: message }]
+          }, { headers: { "Authorization": `Bearer ${apiKey}` }, timeout: 60000 });
+        }
+      }
 
       let reply = response.data?.choices?.[0]?.message?.content?.trim() || "";
 
