@@ -1,3 +1,4 @@
+import { BASE_URL } from "../../lib/axios";
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "react-router";
 import {
@@ -241,7 +242,7 @@ const AiRobotShell = () => {
 
         try {
             const token = localStorage.getItem("aerosonix_token");
-            const response = await fetch(`${import.meta.env.VITE_API_URL}/ai-robot/conversations/${currentId}/message`, {
+            const response = await fetch(`${BASE_URL}/ai-robot/conversations/${currentId}/message`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
