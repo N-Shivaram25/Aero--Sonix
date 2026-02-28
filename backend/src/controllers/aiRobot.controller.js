@@ -1,8 +1,6 @@
 import AiRobotVoice from "../models/AiRobotVoice.js";
 import AiRobotHistory from "../models/AiRobotHistory.js";
 import User from "../models/User.js";
-import { getOpenRouterClient } from "../lib/openRouterClient.js";
-import { getSarvamAIClient } from "../lib/sarvamClient.js";
 import axios from "axios";
 
 const DEFAULT_MODULE = "general";
@@ -31,7 +29,7 @@ const moduleLabel = (module) => {
 const buildSystemPrompt = ({ module, language }) => {
   const pageName = moduleLabel(module);
   const lang = String(language || "English").trim();
-  const langClause = `Respond only in ${lang}.`;
+  const langClause = `You must respond only in ${lang}. This is critical.`;
 
   if (module === "interview") {
     return `You are AI Assistant on the ${pageName} page, an interview coach. Ask realistic interview questions, follow up based on the user's answers, and give concise feedback and improvement tips. ${langClause}`;
@@ -50,7 +48,6 @@ const buildSystemPrompt = ({ module, language }) => {
 };
 
 export async function getVoices(req, res) {
-  // Simplified for Sarvam - they have predefined speakers
   const speakers = [
     { voiceId: "shubh", voiceName: "Shubh (Male)", isDefault: true },
     { voiceId: "aditya", voiceName: "Aditya (Male)", isDefault: true },
@@ -103,40 +100,60 @@ export async function sendMessage(req, res) {
     const priorMessages = Array.isArray(history?.messages) ? history.messages : [];
 
     const systemPrompt = buildSystemPrompt({ module, language });
-
-    const openrouter = getOpenRouterClient();
-    const trimmedContext = priorMessages.slice(-20).map((m) => ({
+    const trimmedContext = priorMessages.slice(-15).map((m) => ({
       role: m.role,
       content: m.text,
     }));
 
-    const response = await openrouter.chat.send({
-      model: "google/gemma-3-4b-it:free",
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...trimmedContext,
-        { role: "user", content: message },
-      ],
-    });
+    const apiKey = process.env.OPEN_ROUTER_API_KEY;
+    if (!apiKey) {
+      console.error("[AI-Robot] Missing OPEN_ROUTER_API_KEY");
+      return res.status(500).json({ message: "AI Integration Error" });
+    }
 
-    const reply = response.choices?.[0]?.message?.content?.trim() || "";
+    try {
+      const openRouterRes = await axios.post("https://openrouter.ai/api/v1/chat/completions", {
+        model: "google/gemma-3-12b-it:free",
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...trimmedContext,
+          { role: "user", content: message },
+        ],
+      }, {
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": process.env.CLIENT_URL || "https://aero-sonix.onrender.com",
+          "X-Title": "AeroSonix"
+        }
+      });
 
-    await AiRobotHistory.findOneAndUpdate(
-      { userId, module },
-      {
-        $push: {
-          messages: {
-            $each: [
-              { role: "user", text: message },
-              { role: "assistant", text: reply || "" },
-            ],
+      const reply = openRouterRes.data?.choices?.[0]?.message?.content?.trim() || "";
+
+      await AiRobotHistory.findOneAndUpdate(
+        { userId, module },
+        {
+          $push: {
+            messages: {
+              $each: [
+                { role: "user", text: message },
+                { role: "assistant", text: reply },
+              ],
+            },
           },
         },
-      },
-      { upsert: true, new: true }
-    );
+        { upsert: true, new: true }
+      );
 
-    return res.status(200).json({ success: true, module, reply });
+      return res.status(200).json({ success: true, module, reply });
+    } catch (apiErr) {
+      console.error("[AI-Robot] OpenRouter API Error:", apiErr.response?.data || apiErr.message);
+      return res.status(502).json({
+        message: "AI service rejected the request",
+        details: apiErr.response?.data || apiErr.message
+      });
+    }
+
   } catch (error) {
     console.error("Error in sendMessage controller", error);
     return res.status(500).json({ message: "Internal Server Error" });
@@ -149,28 +166,26 @@ export async function stt(req, res) {
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const file = req.file;
-    if (!file?.buffer) {
-      return res.status(400).json({ message: "Audio file is required" });
-    }
+    if (!file?.buffer) return res.status(400).json({ message: "Audio file is required" });
 
     const languageCode = String(req.body?.languageCode || "en-IN").trim();
+    const apiKey = process.env.SARVAM_API_KEY;
 
-    const sarvam = getSarvamAIClient();
+    const formData = new FormData();
+    const blob = new Blob([file.buffer], { type: file.mimetype || "audio/wav" });
+    formData.append("file", blob, "audio.wav");
+    formData.append("model", "saaras:v3");
+    formData.append("language-code", languageCode);
 
-    // We'll use axios directly if SDK has issues or to ensure multi-part works well
-    // But let's try Sarvam SDK first as per documentation
-    const response = await sarvam.speechToText.transcribe({
-      file: new Blob([file.buffer], { type: file.mimetype || "audio/wav" }),
-      model: "saaras:v3",
-      mode: "transcribe",
-      "language-code": languageCode
+    const sarvamRes = await axios.post("https://api.sarvam.ai/speech-to-text", formData, {
+      headers: { "api-subscription-key": apiKey }
     });
 
-    const text = String(response.transcript || "").trim();
+    const text = String(sarvamRes.data?.transcript || "").trim();
     return res.status(200).json({ success: true, text });
   } catch (error) {
-    console.error("Error in aiRobot stt controller", error);
-    return res.status(500).json({ message: "Transcription failed", details: error.message });
+    console.error("Error in aiRobot stt controller", error.response?.data || error.message);
+    return res.status(500).json({ message: "Transcription failed" });
   }
 }
 
@@ -182,16 +197,19 @@ export async function translate(req, res) {
     const { text, targetLanguageCode, sourceLanguageCode } = req.body || {};
     if (!text) return res.status(400).json({ message: "text is required" });
 
-    const sarvam = getSarvamAIClient();
-    const response = await sarvam.text.translate({
+    const apiKey = process.env.SARVAM_API_KEY;
+    const sarvamRes = await axios.post("https://api.sarvam.ai/translate", {
       input: text,
       source_language_code: sourceLanguageCode || "auto",
       target_language_code: targetLanguageCode || "hi-IN",
+      mode: "modern-colloquial"
+    }, {
+      headers: { "api-subscription-key": apiKey }
     });
 
-    return res.status(200).json({ success: true, translatedText: response.translated_text });
+    return res.status(200).json({ success: true, translatedText: sarvamRes.data?.translated_text });
   } catch (error) {
-    console.error("Error in aiRobot translate controller", error);
+    console.error("Error in aiRobot translate controller", error.response?.data || error.message);
     return res.status(500).json({ message: "Translation failed" });
   }
 }
@@ -204,25 +222,24 @@ export async function tts(req, res) {
     const { text, languageCode, speaker } = req.body || {};
     if (!text) return res.status(400).json({ message: "text is required" });
 
-    const sarvam = getSarvamAIClient();
-    const response = await sarvam.textToSpeech.convert({
-      text,
+    const apiKey = process.env.SARVAM_API_KEY;
+    const sarvamRes = await axios.post("https://api.sarvam.ai/text-to-speech", {
+      inputs: [text],
       target_language_code: languageCode || "en-IN",
       model: "bulbul:v3",
       speaker: speaker || "shubh"
+    }, {
+      headers: { "api-subscription-key": apiKey }
     });
 
-    // Sarvam SDK response might be a buffer or a JSON with base64 depending on version
-    // Based on doc it seems to return the audio data
-    if (response && response.audio) {
-      const buffer = Buffer.from(response.audio, 'base64');
+    if (sarvamRes.data?.audios?.[0]) {
+      const buffer = Buffer.from(sarvamRes.data.audios[0], 'base64');
       res.setHeader("Content-Type", "audio/mpeg");
       return res.status(200).send(buffer);
     }
-
     return res.status(500).json({ message: "TTS failed" });
   } catch (error) {
-    console.error("Error in aiRobot tts controller", error);
+    console.error("Error in aiRobot tts controller", error.response?.data || error.message);
     return res.status(500).json({ message: "Internal Server Error" });
   }
 }

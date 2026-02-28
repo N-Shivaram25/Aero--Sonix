@@ -14,7 +14,6 @@ import {
 import toast from "react-hot-toast";
 import {
     aiRobotSendMessage,
-    aiRobotHistory,
     aiRobotStt,
     aiRobotTts,
     aiRobotTranslate,
@@ -47,17 +46,17 @@ const AiRobotShell = () => {
     const [translatedPreview, setTranslatedPreview] = useState("");
     const [isTyping, setIsTyping] = useState(false);
     const [voiceLang, setVoiceLang] = useState(VOICE_LANGUAGES[0]);
-    const [transLang, setTransLang] = useState(null); // null means no conversion
+    const [transLang, setTransLang] = useState(null);
 
-    // Voice states: 'idle', 'listening', 'processing', 'speaking', 'error'
     const [voiceState, setVoiceState] = useState("idle");
     const [lastError, setLastError] = useState("");
 
     const scrollRef = useRef(null);
     const recorderRef = useRef(null);
-    const audioContextRef = useRef(null);
     const streamRef = useRef(null);
     const audioPlayerRef = useRef(new Audio());
+    const recognitionRef = useRef(null);
+    const silenceTimerRef = useRef(null);
 
     const module = location.pathname.split("/").pop() || "general";
 
@@ -72,7 +71,6 @@ const AiRobotShell = () => {
         scrollToBottom();
     }, [messages, isTyping, translatedPreview]);
 
-    // Real-time Translation Preview
     useEffect(() => {
         if (transLang && inputText.trim()) {
             const timer = setTimeout(async () => {
@@ -86,7 +84,7 @@ const AiRobotShell = () => {
                 } catch (err) {
                     console.error("Preview translation error:", err);
                 }
-            }, 500); // Debounce
+            }, 500);
             return () => clearTimeout(timer);
         } else {
             setTranslatedPreview("");
@@ -114,12 +112,18 @@ const AiRobotShell = () => {
         if (recorderRef.current && recorderRef.current.state !== "inactive") {
             recorderRef.current.stop();
         }
+        if (recognitionRef.current) {
+            recognitionRef.current.stop();
+        }
         if (streamRef.current) {
             streamRef.current.getTracks().forEach((track) => track.stop());
         }
         if (audioPlayerRef.current) {
             audioPlayerRef.current.pause();
             audioPlayerRef.current.src = "";
+        }
+        if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current);
         }
     };
 
@@ -146,7 +150,8 @@ const AiRobotShell = () => {
                 handleTts(res.reply);
             }
         } catch (err) {
-            toast.error("Failed to send message");
+            console.error("Chat error:", err);
+            toast.error("AI service is currently busy. Please try again.");
         } finally {
             setIsTyping(false);
         }
@@ -158,7 +163,7 @@ const AiRobotShell = () => {
             const audioBuffer = await aiRobotTts({
                 text,
                 languageCode: voiceLang.code,
-                speaker: voiceLang.code.includes("en") ? "shubh" : "ritu" // Simple default
+                speaker: voiceLang.label.match(/hindi|telugu|tamil|kannada/i) ? "ritu" : "shubh"
             });
 
             const blob = new Blob([audioBuffer], { type: "audio/mpeg" });
@@ -175,9 +180,12 @@ const AiRobotShell = () => {
     const startListening = async () => {
         try {
             setVoiceState("listening");
+            setInputText(""); // Clear for real-time typing
+
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             streamRef.current = stream;
 
+            // Initialize MediaRecorder for Sarika (High Quality)
             const mediaRecorder = new MediaRecorder(stream);
             recorderRef.current = mediaRecorder;
             const chunks = [];
@@ -203,10 +211,55 @@ const AiRobotShell = () => {
                 }
             };
 
+            // Initialize Web Speech API for Real-time Typing
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (SpeechRecognition) {
+                const recognition = new SpeechRecognition();
+                recognitionRef.current = recognition;
+                recognition.lang = voiceLang.code;
+                recognition.interimResults = true;
+                recognition.continuous = true;
+
+                recognition.onresult = (event) => {
+                    let interimTranscript = "";
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) {
+                            // Final chunk detected
+                        } else {
+                            interimTranscript += event.results[i][0].transcript;
+                        }
+                    }
+                    const finalOrInterim = Array.from(event.results)
+                        .map(res => res[0].transcript)
+                        .join(' ');
+
+                    setInputText(finalOrInterim);
+
+                    // Reset 2-second silence timer
+                    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+                    silenceTimerRef.current = setTimeout(() => {
+                        console.log("2 seconds silence detected, stopping...");
+                        if (mediaRecorder.state === "recording") {
+                            mediaRecorder.stop();
+                            recognition.stop();
+                        }
+                    }, 2000);
+                };
+
+                recognition.onerror = (e) => console.error("Recognition error:", e);
+                recognition.start();
+            }
+
             mediaRecorder.start();
+
+            // Fallback: Max 15 seconds if no silence detected
             setTimeout(() => {
-                if (mediaRecorder.state === "recording") mediaRecorder.stop();
-            }, 5000); // Max 5 seconds for voice command
+                if (mediaRecorder.state === "recording") {
+                    mediaRecorder.stop();
+                    if (recognitionRef.current) recognitionRef.current.stop();
+                }
+            }, 15000);
+
         } catch (err) {
             setVoiceState("error");
             setLastError("Microphone access denied");
@@ -332,6 +385,7 @@ const AiRobotShell = () => {
                                 <span className="size-1.5 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
                                 <span className="size-1.5 bg-blue-400 rounded-full animate-bounce" />
                             </div>
+                            <span className="text-xs text-blue-400/70 font-medium">Jarvis is thinking...</span>
                         </div>
                     </div>
                 )}
@@ -339,7 +393,6 @@ const AiRobotShell = () => {
 
             {/* Bottom Interface */}
             <footer className="p-6 bg-white/5 backdrop-blur-xl border-t border-white/10 space-y-4">
-                {/* Translation Preview */}
                 {translatedPreview && (
                     <div className="px-4 py-2 bg-blue-500/10 border border-blue-500/20 rounded-xl animate-in slide-in-from-bottom-1 duration-200">
                         <p className="text-[10px] uppercase tracking-widest text-blue-400 font-bold mb-1">Translation Preview ({transLang.label})</p>
@@ -348,15 +401,14 @@ const AiRobotShell = () => {
                 )}
 
                 <div className="flex items-center gap-4">
-                    {/* JARVIS Mic Button */}
                     <div className="relative group shrink-0">
                         <button
                             onClick={handleMicClick}
                             className={`relative z-10 size-14 rounded-full flex items-center justify-center transition-all duration-300 shadow-2xl
                 ${voiceState === "idle" ? "bg-slate-800 text-blue-400 hover:scale-105 border border-white/10 shadow-blue-500/5" : ""}
-                ${voiceState === "listening" ? "bg-red-500 text-white animate-pulse" : ""}
+                ${voiceState === "listening" ? "bg-red-500 text-white shadow-red-500/20" : ""}
                 ${voiceState === "processing" ? "bg-amber-500 text-white" : ""}
-                ${voiceState === "speaking" ? "bg-blue-500 text-white" : ""}
+                ${voiceState === "speaking" ? "bg-blue-500 text-white shadow-blue-500/40" : ""}
                 ${voiceState === "error" ? "bg-rose-600 text-white" : ""}
               `}
                         >
@@ -365,47 +417,42 @@ const AiRobotShell = () => {
                             {voiceState === "processing" && <RefreshCcwIcon className="size-6 animate-spin" />}
                             {voiceState === "speaking" && (
                                 <div className="flex items-end gap-0.5 h-6">
-                                    <div className="w-1 bg-white animate-[equalizer_0.8s_ease-internal_infinite] h-2" />
-                                    <div className="w-1 bg-white animate-[equalizer_0.6s_ease-internal_infinite] h-4" />
-                                    <div className="w-1 bg-white animate-[equalizer_0.9s_ease-internal_infinite] h-full" />
-                                    <div className="w-1 bg-white animate-[equalizer_0.7s_ease-internal_infinite] h-3" />
+                                    <div className="w-1 bg-white animate-[equalizer_0.8s_ease_infinite] h-2" />
+                                    <div className="w-1 bg-white animate-[equalizer_0.6s_ease_infinite] h-4" />
+                                    <div className="w-1 bg-white animate-[equalizer_0.9s_ease_infinite] h-full" />
+                                    <div className="w-1 bg-white animate-[equalizer_0.7s_ease_infinite] h-3" />
                                 </div>
                             )}
                             {voiceState === "error" && <AlertCircleIcon className="size-6" />}
                         </button>
 
-                        {/* Status Text Above Mic */}
-                        <div className="absolute -top-10 left-1/2 -translate-x-1/2 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
-                            <span className="px-2 py-1 bg-[#1e293b] text-[10px] border border-white/10 rounded-md uppercase tracking-wider font-bold">
-                                {voiceState === "idle" ? "Start Voice" : voiceState}
+                        <div className="absolute -top-10 left-1/2 -translate-x-1/2 whitespace-nowrap">
+                            <span className={`px-2 py-1 bg-[#1e293b] text-[10px] border border-white/10 rounded-md uppercase tracking-wider font-bold transition-opacity ${voiceState === 'idle' ? 'opacity-0' : 'opacity-100'}`}>
+                                {voiceState === 'listening' ? 'Listening...' : voiceState === 'processing' ? 'Analysing...' : voiceState === 'speaking' ? 'Speaking...' : voiceState}
                             </span>
                         </div>
 
-                        {/* Pulsing rings for listening */}
                         {voiceState === "listening" && (
                             <>
                                 <div className="absolute top-0 left-0 size-full rounded-full bg-red-500/20 animate-ping" />
                                 <div className="absolute top-0 left-0 size-full rounded-full bg-red-500/20 animate-ping [animation-delay:0.5s]" />
                             </>
                         )}
-                        {/* Glow for speaking */}
                         {voiceState === "speaking" && (
                             <div className="absolute -inset-2 bg-blue-500/30 blur-xl rounded-full animate-pulse" />
                         )}
                     </div>
 
-                    {/* Input Box */}
                     <div className="flex-1 flex items-center bg-white/5 border border-white/10 rounded-2xl px-4 py-2 transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_20px_rgba(59,130,246,0.1)]">
                         <input
                             type="text"
                             value={inputText}
                             onChange={(e) => setInputText(e.target.value)}
                             onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                            placeholder="Type in English..."
-                            className="flex-1 bg-transparent border-none outline-none text-slate-200 placeholder:text-slate-500 py-3"
+                            placeholder={voiceState === 'listening' ? "Speaking..." : "Type in English..."}
+                            className={`flex-1 bg-transparent border-none outline-none text-slate-200 placeholder:text-slate-500 py-3 ${voiceState === 'listening' ? 'animate-pulse text-blue-400' : ''}`}
                         />
 
-                        {/* Translation Selection */}
                         <div className="flex items-center gap-2 pl-4 border-l border-white/10">
                             <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold hidden sm:block">Convert To:</span>
                             <div className="dropdown dropdown-top dropdown-end">
@@ -441,7 +488,6 @@ const AiRobotShell = () => {
                 </div>
             </footer>
 
-            {/* Global Style for Animations */}
             <style>{`
         @keyframes equalizer {
           0%, 100% { height: 4px; }
