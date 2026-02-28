@@ -155,10 +155,18 @@ const AiRobotShell = () => {
                 throw new Error(res.message || "Failed to generate AI response.");
             }
         } catch (err) {
-            const errMsg = err.response?.data?.message || err.message || "AI service error.";
+            const respData = err.response?.data;
+            const errMsg = respData?.message || err.message || "AI service error.";
+            const errDetails = respData?.details?.error?.message || (respData?.details ? JSON.stringify(respData.details) : "");
+
             console.error("Chat error:", err);
-            toast.error(`Jarvis: "${errMsg}"`, { duration: 5000 });
-            setMessages((prev) => [...prev, { role: "assistant", text: `⚠️ ERROR: ${errMsg}`, timestamp: new Date(), isError: true }]);
+            toast.error(`Jarvis: "${errMsg}"`, { duration: 6000 });
+            setMessages((prev) => [...prev, {
+                role: "assistant",
+                text: `⚠️ ERROR: ${errMsg} ${errDetails ? `(${errDetails.substring(0, 150)})` : ""}`,
+                timestamp: new Date(),
+                isError: true
+            }]);
         } finally {
             setIsTyping(false);
         }

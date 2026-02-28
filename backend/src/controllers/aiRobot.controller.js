@@ -5,9 +5,12 @@ import axios from "axios";
 
 const DEFAULT_MODULE = "general";
 
-// NVIDIA DeepSeek Configuration
+// NVIDIA Configuration
 const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
-const NVIDIA_MODEL = "deepseek-ai/deepseek-v3.2";
+// Primary DeepSeek model slugs for NVIDIA
+const PRIMARY_MODEL = "deepseek-ai/deepseek-v3.2";
+const SECONDARY_MODEL = "deepseek-ai/deepseek-v3";
+const SANITY_CHECK_MODEL = "meta/llama-3.1-8b-instruct"; // Guaranteed model for NIMs
 
 const normalizeModule = (value) => {
   const v = String(value || "").trim().toLowerCase();
@@ -101,8 +104,6 @@ export async function sendMessage(req, res) {
     const module = normalizeModule(req.body?.module);
     const language = String(req.body?.language || "English").trim();
 
-    console.log(`${logPrefix} User: ${userId}, Message: "${message}", Language: "${language}"`);
-
     const history = await AiRobotHistory.findOne({ userId, module }).select("messages");
     const priorMessages = Array.isArray(history?.messages) ? history.messages : [];
 
@@ -112,20 +113,20 @@ export async function sendMessage(req, res) {
       content: m.text,
     }));
 
-    // Load API key with support for dots and underscores
+    // Support both keys from .env
     const apiKey = (process.env.DEEPSEEK_V3_2 || process.env["DEEPSEEK_V3.2"] || "").trim();
+
     if (!apiKey) {
-      console.error(`${logPrefix} Missing DEEPSEEK_V3_2 or DEEPSEEK_V3.2 in environment`);
+      console.error(`${logPrefix} Missing NVIDIA/DeepSeek API Key in environment`);
       return res.status(500).json({
-        message: "AI service configuration missing on server (DeepSeek Key)",
-        error: "MISSING_DEEPSEEK_KEY"
+        message: "AI service key (DEEPSEEK_V3_2) is missing on server.",
+        error: "MISSING_KEY"
       });
     }
 
-    // Attempt the AI Call with fallback
-    const fetchData = async (targetModel) => {
-      return axios.post(`${NVIDIA_BASE_URL}/chat/completions`, {
-        model: targetModel,
+    const performCall = async (model, useThinking = false) => {
+      const payload = {
+        model: model,
         messages: [
           { role: "system", content: systemPrompt },
           ...trimmedContext,
@@ -133,88 +134,90 @@ export async function sendMessage(req, res) {
         ],
         temperature: 0.7,
         top_p: 0.9,
-        max_tokens: 8192, // Increased as per DeepSeek capabilities
-        chat_template_kwargs: { thinking: true }
-      }, {
+        max_tokens: 4096,
+      };
+
+      if (useThinking) {
+        payload.chat_template_kwargs = { thinking: true };
+      }
+
+      console.log(`${logPrefix} Attempting: ${model} (Thinking: ${useThinking})`);
+
+      return axios.post(`${NVIDIA_BASE_URL}/chat/completions`, payload, {
         headers: {
           "Authorization": `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        timeout: 90000 // DeepSeek reasoning models need time
+        timeout: 90000
       });
     };
 
+    let response;
     try {
-      console.log(`${logPrefix} Calling NVIDIA DeepSeek (${NVIDIA_MODEL})...`);
-      let response;
+      // Round 1: Primary + Thinking
+      response = await performCall(PRIMARY_MODEL, true);
+    } catch (e1) {
+      console.warn(`${logPrefix} R1 Failed: ${e1.response?.data?.error?.message || e1.message}`);
       try {
-        response = await fetchData(NVIDIA_MODEL);
-      } catch (e1) {
-        console.warn(`${logPrefix} Model ${NVIDIA_MODEL} failed (502/Error). Trying fallback deepseek-ai/deepseek-v3...`);
+        // Round 2: Secondary + Thinking
+        response = await performCall(SECONDARY_MODEL, true);
+      } catch (e2) {
+        console.warn(`${logPrefix} R2 Failed: Trying without thinking parameter...`);
         try {
-          // Try the standard slug without V3.2 suffix
-          response = await fetchData("deepseek-ai/deepseek-v3");
-        } catch (e2) {
-          console.warn(`${logPrefix} Fallback deepseek-ai/deepseek-v3 failed. Trying without thinking parameter...`);
-          // Last ditch: standard call no extras
-          response = await axios.post(`${NVIDIA_BASE_URL}/chat/completions`, {
-            model: "deepseek-ai/deepseek-v3",
-            messages: [{ role: "system", content: systemPrompt }, ...trimmedContext, { role: "user", content: message }]
-          }, { headers: { "Authorization": `Bearer ${apiKey}` }, timeout: 60000 });
+          // Round 3: Secondary (No extras)
+          response = await performCall(SECONDARY_MODEL, false);
+        } catch (e3) {
+          console.warn(`${logPrefix} R3 Failed: Trying Sanity Check Model (Llama 8B)...`);
+          try {
+            // Round 4: Sanity Check
+            response = await performCall(SANITY_CHECK_MODEL, false);
+          } catch (e4) {
+            console.error(`${logPrefix} ALL ATTEMPTS FAILED.`);
+            const lastError = e4.response?.data || e4.message;
+            console.error(`${logPrefix} Last Error Content:`, JSON.stringify(lastError));
+
+            return res.status(e4.response?.status || 502).json({
+              message: "The AI service rejected the request. Please verify your NVIDIA API key and account status.",
+              details: lastError
+            });
+          }
         }
       }
-
-      let reply = response.data?.choices?.[0]?.message?.content?.trim() || "";
-
-      // Handle reasoning content (thinking)
-      const reasoning = response.data?.choices?.[0]?.message?.reasoning_content;
-      if (reasoning) {
-        console.log(`${logPrefix} DeepSeek Thinking: ${reasoning.substring(0, 50)}...`);
-      }
-
-      if (!reply) {
-        console.error(`${logPrefix} No content in AI response:`, JSON.stringify(response.data));
-        throw new Error("Empty reply from AI service");
-      }
-
-      console.log(`${logPrefix} AI Reply generated successfully using DeepSeek`);
-
-      await AiRobotHistory.findOneAndUpdate(
-        { userId, module },
-        {
-          $push: {
-            messages: {
-              $each: [
-                { role: "user", text: message },
-                { role: "assistant", text: reply },
-              ],
-            },
-          },
-        },
-        { upsert: true, new: true }
-      );
-
-      return res.status(200).json({ success: true, module, reply });
-
-    } catch (apiErr) {
-      console.error(`${logPrefix} NVIDIA API Error:`, apiErr.response?.data || apiErr.message);
-      return res.status(apiErr.response?.status || 502).json({
-        message: "The AI service (NVIDIA DeepSeek) rejected the request or is offline.",
-        details: apiErr.response?.data || apiErr.message
-      });
     }
 
+    const reply = response.data?.choices?.[0]?.message?.content?.trim() || "";
+    const reasoning = response.data?.choices?.[0]?.message?.reasoning_content;
+
+    if (reasoning) {
+      console.log(`${logPrefix} Reasoning Captured (Partial): ${reasoning.substring(0, 100)}...`);
+    }
+
+    if (!reply) throw new Error("Received empty response from NVIDIA");
+
+    await AiRobotHistory.findOneAndUpdate(
+      { userId, module },
+      {
+        $push: {
+          messages: {
+            $each: [
+              { role: "user", text: message },
+              { role: "assistant", text: reply },
+            ],
+          },
+        },
+      },
+      { upsert: true, new: true }
+    );
+
+    return res.status(200).json({ success: true, module, reply });
+
   } catch (error) {
-    console.error(`${logPrefix} Unhandled Error in sendMessage:`, error);
-    return res.status(500).json({
-      message: "An internal server error occurred while processing the AI response.",
-      details: error.message
-    });
+    console.error(`${logPrefix} Controller Overflow:`, error);
+    return res.status(500).json({ message: "Internal Server Emergency Error" });
   }
 }
 
 export async function stt(req, res) {
-  const logPrefix = `[AI-ASSISTANT][STT][${new Date().toISOString()}]`;
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
@@ -224,8 +227,6 @@ export async function stt(req, res) {
 
     const languageCode = String(req.body?.languageCode || "en-IN").trim();
     const apiKey = (process.env.SARVAM_API_KEY || "").trim();
-
-    if (!apiKey) return res.status(500).json({ message: "Speech service key missing" });
 
     const formData = new FormData();
     const blob = new Blob([file.buffer], { type: file.mimetype || "audio/wav" });
@@ -240,20 +241,17 @@ export async function stt(req, res) {
     const text = String(sarvamRes.data?.transcript || "").trim();
     return res.status(200).json({ success: true, text });
   } catch (error) {
-    console.error(`${logPrefix} Error:`, error.response?.data || error.message);
+    console.error("STT Error:", error.response?.data || error.message);
     return res.status(500).json({ message: "Transcription failed" });
   }
 }
 
 export async function translate(req, res) {
-  const logPrefix = `[AI-ASSISTANT][TRANSLATE][${new Date().toISOString()}]`;
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const { text, targetLanguageCode, sourceLanguageCode } = req.body || {};
-    if (!text) return res.status(400).json({ message: "text is required" });
-
     const apiKey = (process.env.SARVAM_API_KEY || "").trim();
 
     const sarvamRes = await axios.post("https://api.sarvam.ai/translate", {
@@ -262,28 +260,21 @@ export async function translate(req, res) {
       target_language_code: targetLanguageCode || "hi-IN",
       mode: "modern-colloquial"
     }, {
-      headers: {
-        "api-subscription-key": apiKey,
-        "Content-Type": "application/json"
-      }
+      headers: { "api-subscription-key": apiKey }
     });
 
     return res.status(200).json({ success: true, translatedText: sarvamRes.data?.translated_text });
   } catch (error) {
-    console.error(`${logPrefix} Error:`, error.response?.data || error.message);
     return res.status(500).json({ message: "Translation failed" });
   }
 }
 
 export async function tts(req, res) {
-  const logPrefix = `[AI-ASSISTANT][TTS][${new Date().toISOString()}]`;
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const { text, languageCode, speaker } = req.body || {};
-    if (!text) return res.status(400).json({ message: "text is required" });
-
     const apiKey = (process.env.SARVAM_API_KEY || "").trim();
 
     const sarvamRes = await axios.post("https://api.sarvam.ai/text-to-speech", {
@@ -292,10 +283,7 @@ export async function tts(req, res) {
       model: "bulbul:v3",
       speaker: speaker || "shubh"
     }, {
-      headers: {
-        "api-subscription-key": apiKey,
-        "Content-Type": "application/json"
-      }
+      headers: { "api-subscription-key": apiKey }
     });
 
     if (sarvamRes.data?.audios?.[0]) {
@@ -305,7 +293,6 @@ export async function tts(req, res) {
     }
     return res.status(500).json({ message: "TTS failed" });
   } catch (error) {
-    console.error(`${logPrefix} Error:`, error.response?.data || error.message);
     return res.status(500).json({ message: "Internal Server Error" });
   }
 }
