@@ -240,49 +240,75 @@ const AiRobotShell = () => {
         setIsTyping(true);
 
         try {
-            const res = await aiRobotSendConversationMessage({
-                conversationId: currentId,
-                message: textToSend,
-                language: voiceLang.label
+            const token = localStorage.getItem("aerosonix_token");
+            const response = await fetch(`${import.meta.env.VITE_API_URL}/ai-robot/conversations/${currentId}/message`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`,
+                    "Accept": "text/event-stream"
+                },
+                body: JSON.stringify({ message: textToSend, language: voiceLang.label })
             });
 
-            if (res.success) {
-                const fullReply = res.reply;
-                const aiMsg = { role: "assistant", text: "", timestamp: new Date() };
+            if (!response.ok) throw new Error("Stream connection failed.");
 
-                // 1. Initiate parallel TTS stream immediately
-                handleTts(fullReply);
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let accumulatedReply = "";
+            let sentenceBuffer = "";
+            let aiMsgId = Date.now();
 
-                // 2. Start Parallel Typewriter Effect
-                setMessages((prev) => [...prev, aiMsg]);
-                const words = fullReply.split(" ");
-                let currentText = "";
-                let wordIndex = 0;
+            setMessages(prev => [...prev, { id: aiMsgId, role: "assistant", text: "", timestamp: new Date() }]);
 
-                const typewriterInterval = setInterval(() => {
-                    if (wordIndex < words.length) {
-                        currentText += (wordIndex === 0 ? "" : " ") + words[wordIndex];
-                        setMessages((prev) => {
-                            const updated = [...prev];
-                            const lastIdx = updated.length - 1;
-                            if (updated[lastIdx] && updated[lastIdx].role === "assistant") {
-                                updated[lastIdx] = { ...updated[lastIdx], text: currentText };
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value);
+                const lines = chunk.split("\n");
+
+                for (const line of lines) {
+                    if (line.startsWith("data: ")) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            if (data.chunk) {
+                                accumulatedReply += data.chunk;
+                                sentenceBuffer += data.chunk;
+
+                                // Update UI in real-time
+                                setMessages(prev => {
+                                    const updated = [...prev];
+                                    const last = updated[updated.length - 1];
+                                    if (last && last.role === "assistant") {
+                                        last.text = accumulatedReply;
+                                    }
+                                    return updated;
+                                });
+
+                                // PARALLEL TTS TRIGGER: Check for sentence end
+                                // Match punctuation followed by space or newline
+                                if (/[.!?]\s$/.test(sentenceBuffer) || sentenceBuffer.includes("\n")) {
+                                    const sentence = sentenceBuffer.trim();
+                                    if (sentence.length > 10) { // Accuracy catch: don't TTS tiny fragments
+                                        handleTts(sentence);
+                                        sentenceBuffer = "";
+                                    }
+                                }
                             }
-                            return updated;
-                        });
-                        wordIndex++;
-                    } else {
-                        clearInterval(typewriterInterval);
+                            if (data.done && data.title) {
+                                setConversations(prev => prev.map(c => c.id === currentId ? { ...c, title: data.title } : c));
+                            }
+                        } catch (e) { /* ignore partial json */ }
                     }
-                }, 65); // ~15 words per second
-
-                // 3. Update conversation title if needed
-                if (res.title) {
-                    setConversations(prev => prev.map(c => c.id === currentId ? { ...c, title: res.title } : c));
                 }
-            } else {
-                throw new Error(res.message || "Failed to generate AI response.");
             }
+
+            // Flush final sentence if any
+            if (sentenceBuffer.trim().length > 0) {
+                handleTts(sentenceBuffer.trim());
+            }
+
         } catch (err) {
             const respData = err.response?.data;
             const errMsg = respData?.message || err.message || "AeroSonix is temporarily overloaded.";

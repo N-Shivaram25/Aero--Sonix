@@ -184,81 +184,77 @@ export async function sendConversationMessage(req, res) {
     if (!message) return res.status(400).json({ message: "Message is required." });
 
     const language = String(req.body?.language || "English").trim();
+    const isStream = req.headers.accept === "text/event-stream";
 
-    console.log(`${logPrefix} Session: ${id}, User: ${userId}, Msg: "${message.slice(0, 50)}..."`);
+    console.log(`${logPrefix} Session: ${id}, Stream: ${isStream}, Msg: "${message.slice(0, 50)}..."`);
 
     const convo = await AiRobotConversation.findOne({ _id: id, userId }).select("module title messages");
-    if (!convo) {
-      console.error(`${logPrefix} Conversation ${id} not found for user ${userId}`);
-      return res.status(404).json({ message: "Conversation not found" });
-    }
+    if (!convo) return res.status(404).json({ message: "Conversation not found" });
 
     const module = normalizeModule(convo.module);
     const systemPrompt = buildSystemPrompt({ module, language });
-
-    const prior = Array.isArray(convo.messages) ? convo.messages : [];
-    const trimmedContext = prior.slice(-12).map((m) => ({ role: m.role, content: m.text }));
+    const trimmedContext = (convo.messages || []).slice(-12).map((m) => ({ role: m.role, content: m.text }));
 
     const apiKey = (process.env.CEREBRAS_API_KEY || "").trim();
-    if (!apiKey) {
-      console.error(`${logPrefix} Missing CEREBRAS_API_KEY`);
-      return res.status(500).json({ message: "Server AI configuration missing." });
-    }
+    if (!apiKey) return res.status(500).json({ message: "Cerebras API key not set." });
 
     const cerebras = new Cerebras({ apiKey });
 
-    try {
-      console.log(`${logPrefix} Requesting Cerebras GPT-OSS...`);
-      const completion = await cerebras.chat.completions.create({
-        model: CEREBRAS_MODEL,
-        temperature: 0.7,
-        max_completion_tokens: 4096,
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...trimmedContext,
-          { role: "user", content: message }
-        ],
-      });
+    if (isStream) {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
 
-      const reply = completion?.choices?.[0]?.message?.content?.trim() || "";
-      if (!reply) throw new Error("Empty reply from Cerebras");
+      let fullReply = "";
+      try {
+        const stream = await cerebras.chat.completions.create({
+          model: CEREBRAS_MODEL,
+          messages: [{ role: "system", content: systemPrompt }, ...trimmedContext, { role: "user", content: message }],
+          stream: true,
+        });
 
-      console.log(`${logPrefix} Reply generated successfully.`);
+        for await (const chunk of stream) {
+          const content = chunk.choices[0]?.delta?.content || "";
+          if (content) {
+            fullReply += content;
+            res.write(`data: ${JSON.stringify({ chunk: content })}\n\n`);
+          }
+        }
 
-      const nextTitle = convo.title === "New chat" ? toTitleFromMessage(message) : convo.title;
+        // Save at the end
+        const nextTitle = convo.title === "New chat" ? toTitleFromMessage(message) : convo.title;
+        await AiRobotConversation.findOneAndUpdate(
+          { _id: id, userId },
+          { $set: { title: nextTitle }, $push: { messages: { $each: [{ role: "user", text: message }, { role: "assistant", text: fullReply }] } } }
+        );
 
-      await AiRobotConversation.findOneAndUpdate(
-        { _id: id, userId },
-        {
-          $set: { title: nextTitle },
-          $push: {
-            messages: {
-              $each: [
-                { role: "user", text: message },
-                { role: "assistant", text: reply },
-              ],
-            },
-          },
-        },
-        { new: true }
-      );
-
-      return res.status(200).json({
-        success: true,
-        module,
-        reply,
-        title: nextTitle,
-      });
-
-    } catch (apiErr) {
-      console.error(`${logPrefix} Cerebras API Error:`, apiErr.message);
-      return res.status(502).json({
-        message: "AI service is currently busy or unavailable.",
-        details: apiErr.message
-      });
+        res.write(`data: ${JSON.stringify({ done: true, title: nextTitle })}\n\n`);
+        return res.end();
+      } catch (streamErr) {
+        console.error(`${logPrefix} Stream Error:`, streamErr);
+        res.write(`data: ${JSON.stringify({ error: streamErr.message })}\n\n`);
+        return res.end();
+      }
     }
+
+    // Fallback to non-streaming
+    const completion = await cerebras.chat.completions.create({
+      model: CEREBRAS_MODEL,
+      messages: [{ role: "system", content: systemPrompt }, ...trimmedContext, { role: "user", content: message }],
+    });
+
+    const reply = completion?.choices?.[0]?.message?.content?.trim() || "";
+    const nextTitle = convo.title === "New chat" ? toTitleFromMessage(message) : convo.title;
+
+    await AiRobotConversation.findOneAndUpdate(
+      { _id: id, userId },
+      { $set: { title: nextTitle }, $push: { messages: { $each: [{ role: "user", text: message }, { role: "assistant", text: reply }] } } }
+    );
+
+    return res.status(200).json({ success: true, reply, title: nextTitle });
+
   } catch (error) {
-    console.error(`${logPrefix} Unhandled Error in sendConversationMessage:`, error);
-    return res.status(500).json({ message: "Internal Server Error in session processing." });
+    console.error(`${logPrefix} Controller Error:`, error);
+    return res.status(500).json({ message: "Internal Server Error" });
   }
 }
