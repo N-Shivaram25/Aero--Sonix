@@ -260,11 +260,15 @@ const AiRobotShell = () => {
                 throw new Error(res.message || "Failed to generate AI response.");
             }
         } catch (err) {
+            const respData = err.response?.data;
+            const errMsg = respData?.message || err.message || "AeroSonix is temporarily overloaded.";
+            const details = respData?.details ? ` (${respData.details})` : "";
+
             console.error("Chat error:", err);
-            toast.error("Inference Error - Check Server");
+            toast.error(`AeroSonix ERROR: ${errMsg}`);
             setMessages((prev) => [...prev, {
                 role: "assistant",
-                text: `⚠️ Inference Error: ${err.message || 'Unknown'}`,
+                text: `⚠️ Inference Error: ${errMsg}${details}. Please verify if CEREBRAS_API_KEY is added to your Render dashboard environment variables.`,
                 timestamp: new Date(),
                 isError: true
             }]);

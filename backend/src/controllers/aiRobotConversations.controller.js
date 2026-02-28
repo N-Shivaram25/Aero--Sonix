@@ -175,11 +175,13 @@ export async function sendConversationMessage(req, res) {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
-    const id = String(req.params?.conversationId || "").trim();
-    if (!id) return res.status(400).json({ message: "conversationId is required" });
+    const id = (req.params?.conversationId || "").trim();
+    if (!id || id === "undefined" || id === "null") {
+      return res.status(400).json({ message: "Invalid or missing conversationId." });
+    }
 
-    const message = String(req.body?.message || "").trim();
-    if (!message) return res.status(400).json({ message: "message is required" });
+    const message = (req.body?.message || "").trim();
+    if (!message) return res.status(400).json({ message: "Message is required." });
 
     const language = String(req.body?.language || "English").trim();
 
