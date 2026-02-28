@@ -86,6 +86,8 @@ const AiRobotShell = () => {
     const recorderRef = useRef(null);
     const streamRef = useRef(null);
     const audioPlayerRef = useRef(new Audio());
+    const audioQueueRef = useRef([]);
+    const isProcessingQueueRef = useRef(false);
     const recognitionRef = useRef(null);
     const silenceTimerRef = useRef(null);
 
@@ -290,13 +292,20 @@ const AiRobotShell = () => {
                                     return updated;
                                 });
 
-                                // PARALLEL TTS TRIGGER: Check for sentence end
-                                // Match punctuation followed by space or newline
-                                if (/[.!?]\s$/.test(sentenceBuffer) || sentenceBuffer.includes("\n")) {
-                                    const sentence = sentenceBuffer.trim();
-                                    if (sentence.length > 10) { // Accuracy catch: don't TTS tiny fragments
-                                        handleTts(sentence);
-                                        sentenceBuffer = "";
+                                // PARALLEL TTS TRIGGER: Robust sentence detection
+                                const sentences = sentenceBuffer.match(/[^.!?]+[.!?](\s|$|\n)/g);
+                                if (sentences) {
+                                    for (const s of sentences) {
+                                        const cleanSentence = s.trim()
+                                            .replace(/[#*`~]/g, '')
+                                            .replace(/\[\d+\]/g, '') // citations
+                                            .replace(/\(https?:\/\/[^\)]+\)/g, '') // hidden links
+                                            .trim();
+
+                                        if (cleanSentence.length > 2) {
+                                            handleTts(cleanSentence);
+                                        }
+                                        sentenceBuffer = sentenceBuffer.replace(s, '');
                                     }
                                 }
                             }
@@ -308,9 +317,13 @@ const AiRobotShell = () => {
                 }
             }
 
-            // Flush final sentence if any
+            // Flush final residue
             if (sentenceBuffer.trim().length > 0) {
-                handleTts(sentenceBuffer.trim());
+                const finalClean = sentenceBuffer.trim()
+                    .replace(/[#*`~]/g, '')
+                    .replace(/\[\d+\]/g, '')
+                    .trim();
+                if (finalClean.length > 1) handleTts(finalClean);
             }
 
         } catch (err) {
@@ -332,70 +345,62 @@ const AiRobotShell = () => {
     };
 
     const handleTts = async (text) => {
-        const logPrefix = "[AEROSONIX][TTS-DEBUG]";
+        const logPrefix = "[AEROSONIX][TTS-QUEUE]";
         try {
-            if (!text) return;
-            console.log(`${logPrefix} Initiating TTS for: "${text.slice(0, 40)}..."`);
-            setVoiceState("speaking");
+            if (!text || text.length < 2) return;
 
-            // Use the integrated API helper instead of manual fetch to avoid "undefined" URL issues
+            // 1. Fetch Audio Chunk Immediately
             const audioData = await aiRobotTts({
                 text,
                 languageCode: voiceLang.code,
                 speaker: selectedVoice?.voiceId || "shubh"
             });
 
-            if (!audioData || audioData.byteLength < 100) {
-                console.error(`${logPrefix} Received invalid or empty audio buffer.`);
-                throw new Error("Empty audio response");
-            }
+            if (!audioData || audioData.byteLength < 100) return;
 
-            console.log(`${logPrefix} Audio byteLength: ${audioData.byteLength}`);
-
+            // 2. Add to Queue
             const blob = new Blob([audioData], { type: "audio/mpeg" });
             const url = URL.createObjectURL(blob);
+            audioQueueRef.current.push({ url, text });
 
-            audioPlayerRef.current.src = url;
-
-            audioPlayerRef.current.onerror = (e) => {
-                console.error(`${logPrefix} HTML5 Audio Player Error:`, e);
-                toast.error("Audio playback error.");
-                setVoiceState("idle");
-            };
-
-            const playPromise = audioPlayerRef.current.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(error => {
-                    console.error(`${logPrefix} Autoplay blocked or failure:`, error);
-                    toast.error("Playback blocked. Please click anywhere to allow voice.");
-                    setVoiceState("idle");
-                });
+            // 3. Trigger Sequential Playback
+            if (!isProcessingQueueRef.current) {
+                processAudioQueue();
             }
-
-            audioPlayerRef.current.onended = () => {
-                setVoiceState("idle");
-                URL.revokeObjectURL(url);
-                console.log(`${logPrefix} Playback finished.`);
-            };
 
         } catch (err) {
-            let actualMsg = err.message || "Unknown voice error";
+            console.error(`${logPrefix} Fetch Error:`, err);
+        }
+    };
 
-            // Handle Axios errors where responseType was 'arraybuffer'
-            if (err.response?.data instanceof ArrayBuffer) {
-                try {
-                    const decoded = JSON.parse(new TextDecoder().decode(err.response.data));
-                    actualMsg = decoded.message || decoded.error?.message || actualMsg;
-                } catch (e) {
-                    // Not JSON, ignore
-                }
-            } else if (err.response?.data?.message) {
-                actualMsg = err.response.data.message;
-            }
-
-            console.error(`${logPrefix} CRITICAL FAILURE:`, actualMsg, err);
-            toast.error(`Voice Assistant: ${actualMsg}`);
+    const processAudioQueue = async () => {
+        if (audioQueueRef.current.length === 0) {
+            isProcessingQueueRef.current = false;
             setVoiceState("idle");
+            return;
+        }
+
+        isProcessingQueueRef.current = true;
+        setVoiceState("speaking");
+
+        const { url, text } = audioQueueRef.current.shift();
+        console.log(`[AEROSONIX][VOICE] Narrating: "${text.slice(0, 30)}..."`);
+
+        audioPlayerRef.current.src = url;
+
+        const onEnded = () => {
+            URL.revokeObjectURL(url);
+            audioPlayerRef.current.removeEventListener('ended', onEnded);
+            processAudioQueue();
+        };
+
+        audioPlayerRef.current.addEventListener('ended', onEnded);
+
+        try {
+            await audioPlayerRef.current.play();
+        } catch (error) {
+            console.error("Playback failed:", error);
+            processAudioQueue();
         }
     };
 
