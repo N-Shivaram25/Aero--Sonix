@@ -62,10 +62,14 @@ FORMATTING RULES:
 
 export async function getVoices(req, res) {
   const speakers = [
-    { voiceId: "shubh", voiceName: "Shubh (Male)", isDefault: true },
+    { voiceId: "shubh", voiceName: "Shubh (Male) - Default", isDefault: true },
     { voiceId: "ritu", voiceName: "Ritu (Female)", isDefault: false },
+    { voiceId: "aditya", voiceName: "Aditya (Male)", isDefault: false },
+    { voiceId: "priya", voiceName: "Priya (Female)", isDefault: false },
     { voiceId: "amit", voiceName: "Amit (Male)", isDefault: false },
+    { voiceId: "simran", voiceName: "Simran (Female)", isDefault: false },
     { voiceId: "sumit", voiceName: "Sumit (Male)", isDefault: false },
+    { voiceId: "kavya", voiceName: "Kavya (Female)", isDefault: false },
   ];
   return res.status(200).json({ success: true, voices: speakers });
 }
@@ -242,36 +246,49 @@ export async function tts(req, res) {
     const { text, languageCode, speaker } = req.body || {};
     const apiKey = (process.env.SARVAM_API_KEY || "").trim();
 
-    console.log(`${logPrefix} Initiating Streaming TTS: Speaker="${speaker || 'shubh'}", Length=${text?.length}`);
+    if (!apiKey) {
+      console.error(`${logPrefix} Missing SARVAM_API_KEY`);
+      return res.status(500).json({ message: "Sarvam API configuration missing." });
+    }
 
-    const sarvamRes = await axios({
-      method: "post",
-      url: "https://api.sarvam.ai/text-to-speech/stream",
-      data: {
-        text: text,
-        target_language_code: languageCode || "en-IN",
-        speaker: speaker || "shubh",
-        model: "bulbul:v3",
-        pace: 1.1,
-        speech_sample_rate: 22050,
-        output_audio_codec: "mp3",
-        enable_preprocessing: true
-      },
+    console.log(`${logPrefix} Calling Sarvam Bulbul V3: Speaker="${speaker || 'shubh'}", Length=${text?.length}`);
+
+    const sarvamRes = await axios.post("https://api.sarvam.ai/text-to-speech", {
+      text: text,
+      target_language_code: languageCode || "en-IN",
+      model: "bulbul:v3",
+      speaker: speaker || "shubh",
+      pace: 1.1,
+      speech_sample_rate: 22050,
+      enable_preprocessing: true
+    }, {
       headers: {
         "api-subscription-key": apiKey,
         "Content-Type": "application/json"
-      },
-      responseType: "stream"
+      }
     });
 
-    res.setHeader("Content-Type", "audio/mpeg");
-    sarvamRes.data.pipe(res);
+    if (sarvamRes.data?.audios && sarvamRes.data.audios.length > 0) {
+      // Decode the base64 response from Sarvam AI
+      const audioBase64 = sarvamRes.data.audios[0];
+      const audioBuffer = Buffer.from(audioBase64, 'base64');
+
+      res.setHeader("Content-Type", "audio/mpeg");
+      return res.status(200).send(audioBuffer);
+    } else {
+      console.error(`${logPrefix} Invalid response from Sarvam:`, sarvamRes.data);
+      return res.status(500).json({ message: "Failed to generate audio from AI service." });
+    }
 
   } catch (error) {
-    console.error(`${logPrefix} Streaming TTS Error:`, error.response?.data || error.message);
-    if (!res.headersSent) {
-      return res.status(500).json({ message: "Internal Server Error during TTS streaming." });
-    }
+    const status = error.response?.status || 500;
+    const errData = error.response?.data?.error || {};
+    console.error(`${logPrefix} Sarvam API Error [${status}]:`, errData.message || error.message);
+
+    return res.status(status).json({
+      message: errData.message || "AeroSonix Voice service is temporarily unavailable.",
+      code: errData.code
+    });
   }
 }
 

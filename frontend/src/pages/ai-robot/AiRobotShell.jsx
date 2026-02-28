@@ -320,54 +320,23 @@ const AiRobotShell = () => {
                 })
             });
 
-            if (!response.ok) throw new Error("TTS Stream Request Failed");
-
-            // REAL-TIME STREAMING PLAYBACK
-            if ("MediaSource" in window && MediaSource.isTypeSupported("audio/mpeg")) {
-                const mediaSource = new MediaSource();
-                const url = URL.createObjectURL(mediaSource);
-                audioPlayerRef.current.src = url;
-
-                mediaSource.addEventListener("sourceopen", async () => {
-                    const sourceBuffer = mediaSource.addSourceBuffer("audio/mpeg");
-                    const reader = response.body.getReader();
-
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) {
-                            if (mediaSource.readyState === "open") mediaSource.endOfStream();
-                            break;
-                        }
-
-                        await new Promise(resolve => {
-                            if (sourceBuffer.updating) {
-                                sourceBuffer.addEventListener("updateend", resolve, { once: true });
-                            } else resolve();
-                        });
-
-                        sourceBuffer.appendBuffer(value);
-                    }
-                });
-
-                audioPlayerRef.current.play();
-                audioPlayerRef.current.onended = () => setVoiceState("idle");
-            } else {
-                // FALLBACK: BLOB Collect
-                const chunks = [];
-                const reader = response.body.getReader();
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    chunks.push(value);
-                }
-                const blob = new Blob(chunks, { type: "audio/mpeg" });
-                audioPlayerRef.current.src = URL.createObjectURL(blob);
-                audioPlayerRef.current.play();
-                audioPlayerRef.current.onended = () => setVoiceState("idle");
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.message || "TTS Request Failed");
             }
 
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+
+            audioPlayerRef.current.src = url;
+            audioPlayerRef.current.play();
+            audioPlayerRef.current.onended = () => {
+                setVoiceState("idle");
+                URL.revokeObjectURL(url);
+            };
+
         } catch (err) {
-            console.error("TTS Streaming Error:", err);
+            console.error("TTS Playback Error:", err);
             setVoiceState("idle");
         }
     };
