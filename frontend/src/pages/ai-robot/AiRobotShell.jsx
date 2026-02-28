@@ -18,7 +18,12 @@ import {
     HistoryIcon,
     Trash2Icon,
     XIcon,
-    MessageSquareIcon
+    MessageSquareIcon,
+    Maximize2Icon,
+    Minimize2Icon,
+    EyeIcon,
+    EyeOffIcon,
+    ArrowLeftIcon
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -71,6 +76,8 @@ const AiRobotShell = () => {
     const [conversations, setConversations] = useState([]);
     const [activeConvoId, setActiveConvoId] = useState(null);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+    const [isFullScreen, setIsFullScreen] = useState(false);
+    const [isChatHidden, setIsChatHidden] = useState(false);
 
     const [voiceState, setVoiceState] = useState("idle");
     const [lastError, setLastError] = useState("");
@@ -130,13 +137,8 @@ const AiRobotShell = () => {
             const res = await getAiRobotConversations({ module });
             if (res.success) {
                 setConversations(res.conversations || []);
-                // By default, if no active, try to load the latest one
-                if (!activeConvoId && res.conversations.length > 0) {
-                    loadConversation(res.conversations[0].id);
-                } else if (res.conversations.length === 0) {
-                    setMessages([]);
-                    setActiveConvoId(null);
-                }
+                // User Request: Whenever user opens AI Assistance, it should open in New Session
+                handleNewChat();
             }
         } catch (err) {
             console.error("Fetch conversations error:", err);
@@ -249,6 +251,7 @@ const AiRobotShell = () => {
                     "Authorization": `Bearer ${token}`,
                     "Accept": "text/event-stream"
                 },
+                credentials: "include", // Ensure cookies are sent (fixes 401 if token is in cookie)
                 body: JSON.stringify({ message: textToSend, language: voiceLang.label })
             });
 
@@ -460,10 +463,48 @@ const AiRobotShell = () => {
     };
 
     return (
-        <div className="flex bg-slate-950 h-screen text-slate-100 overflow-hidden font-sans relative">
+        <div className={`flex bg-slate-950 text-slate-100 font-sans transition-all duration-700 ease-in-out ${isFullScreen ? 'fixed inset-0 z-[100] w-screen h-screen' : 'relative h-screen w-full overflow-hidden'}`}>
 
-            {/* Multi-Chat History Sidebar (Drawer style) */}
-            <aside className={`fixed inset-y-0 left-0 w-80 bg-slate-900 border-r border-white/5 z-50 transition-transform duration-500 ease-in-out ${isHistoryOpen ? 'translate-x-0' : '-translate-x-full'} shadow-2xl`}>
+            {/* AI Core Pulse Animation (Voice-to-Voice Mode) */}
+            {isChatHidden && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 z-10 animate-in fade-in zoom-in duration-1000">
+                    <div className="relative flex items-center justify-center">
+                        {/* Outer Glows */}
+                        <div className={`absolute size-[400px] rounded-full blur-[120px] transition-all duration-1000 ${voiceState === "speaking" ? "bg-cyan-500/30 scale-125" : voiceState === "listening" ? "bg-primary/40 scale-110" : "bg-primary/10 scale-90"}`}></div>
+                        <div className={`absolute size-[250px] rounded-full blur-[60px] transition-all duration-1000 ${voiceState === "speaking" ? "bg-cyan-400/20" : "bg-primary/20"}`}></div>
+
+                        {/* Pulsing Spheres */}
+                        <div className={`relative size-48 md:size-64 rounded-full flex items-center justify-center transition-all duration-500 border border-white/10 shadow-2xl overflow-hidden
+                            ${voiceState === "speaking" ? "bg-cyan-600/20 ring-4 ring-cyan-500/30 scale-105" : "bg-primary/20 ring-4 ring-primary/40"}
+                        `}>
+                            {/* Inner Energy Core */}
+                            <div className={`size-32 md:size-40 rounded-full blur-xl animate-pulse transition-colors duration-500 ${voiceState === "speaking" ? "bg-cyan-400" : "bg-primary"}`}></div>
+
+                            {/* Center Icon */}
+                            <div className="absolute inset-0 flex items-center justify-center">
+                                {voiceState === "speaking" ? <ZapIcon className="size-16 text-white animate-bounce" /> : <BotIcon className="size-16 text-white" />}
+                            </div>
+
+                            {/* Orbital Rings */}
+                            <div className="absolute inset-0 border-2 border-dashed border-white/5 rounded-full animate-[spin_12s_linear_infinite]"></div>
+                            <div className="absolute inset-4 border border-dashed border-white/5 rounded-full animate-[spin_8s_linear_reverse_infinite]"></div>
+                        </div>
+
+                        {/* Dynamic status text */}
+                        <div className="absolute -bottom-24 text-center">
+                            <span className="text-xs font-black uppercase tracking-[0.4em] text-white/40 mb-2 block">
+                                {voiceState === "speaking" ? "Assistant Vocalizing" : voiceState === "listening" ? "Listening to Signal" : "Neural Link Active"}
+                            </span>
+                            <div className="h-1 w-48 bg-white/5 rounded-full overflow-hidden relative">
+                                <div className={`absolute inset-y-0 left-0 transition-all duration-500 bg-gradient-to-r from-transparent via-primary to-transparent ${voiceState !== "idle" ? "w-full animate-[shimmer_2s_infinite]" : "w-0"}`}></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Sidebar (Archives) */}
+            <aside className={`fixed inset-y-0 left-0 w-80 bg-slate-900 border-r border-white/5 z-[60] transition-transform duration-500 ease-in-out ${isHistoryOpen ? 'translate-x-0' : '-translate-x-full'} shadow-2xl`}>
                 <div className="flex items-center justify-between p-6 border-b border-white/5 bg-slate-800/20">
                     <div className="flex items-center gap-3">
                         <HistoryIcon className="size-5 text-primary" />
@@ -471,12 +512,10 @@ const AiRobotShell = () => {
                     </div>
                     <button onClick={() => setIsHistoryOpen(false)} className="btn btn-ghost btn-sm btn-circle"><XIcon className="size-5" /></button>
                 </div>
-
                 <div className="p-4 space-y-4 overflow-y-auto h-[calc(100%-80px)] custom-scrollbar">
                     <button onClick={handleNewChat} className="btn btn-primary w-full gap-2 rounded-2xl shadow-lg border-none hover:scale-95 transition-all">
                         <PlusIcon className="size-4" /> Start New Session
                     </button>
-
                     <div className="space-y-2 mt-6">
                         {conversations.length === 0 && <p className="text-center text-slate-600 text-xs py-10 font-bold italic uppercase tracking-tighter">Memory Units Empty</p>}
                         {conversations.map(convo => (
@@ -489,81 +528,89 @@ const AiRobotShell = () => {
                                     <MessageSquareIcon className={`size-4 shrink-0 ${activeConvoId === convo.id ? 'text-primary' : 'text-slate-600'}`} />
                                     <span className={`text-xs font-bold truncate ${activeConvoId === convo.id ? 'text-white' : 'text-slate-400'}`}>{convo.title}</span>
                                 </div>
-                                <button
-                                    onClick={(e) => handleDeleteConvo(e, convo.id)}
-                                    className="opacity-0 group-hover:opacity-100 btn btn-ghost btn-xs btn-square text-error hover:bg-error/20"
-                                >
-                                    <Trash2Icon className="size-3.5" />
-                                </button>
+                                <button onClick={(e) => handleDeleteConvo(e, convo.id)} className="opacity-0 group-hover:opacity-100 btn btn-ghost btn-xs btn-square text-error hover:bg-error/20"><Trash2Icon className="size-3.5" /></button>
                             </div>
                         ))}
                     </div>
                 </div>
             </aside>
 
-            {/* Backdrop for Sidebar */}
-            {isHistoryOpen && <div onClick={() => setIsHistoryOpen(false)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 animate-in fade-in duration-300"></div>}
+            {isHistoryOpen && <div onClick={() => setIsHistoryOpen(false)} className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 animate-in fade-in duration-300"></div>}
 
-            {/* Main Assistant Shell */}
-            <div className="flex-1 flex flex-col h-full bg-slate-950 overflow-hidden">
-                <header className="navbar bg-slate-900/50 backdrop-blur-xl border-b border-white/5 px-6 shrink-0 z-20">
-                    <div className="flex-1 gap-4">
-                        <button onClick={() => setIsHistoryOpen(true)} className="btn btn-ghost btn-sm btn-circle md:mr-2 hover:bg-primary/10 hover:text-primary">
+            {/* Main Shell Container */}
+            <div className="flex-1 flex flex-col h-full bg-slate-950 overflow-hidden relative">
+
+                {/* Fixed Non-Scrollable Header */}
+                <header className="navbar bg-slate-900/40 backdrop-blur-2xl border-b border-white/5 px-6 shrink-0 z-20">
+                    <div className="flex-1 gap-2 sm:gap-4 items-center">
+                        <button onClick={() => setIsHistoryOpen(true)} className="btn btn-ghost btn-sm btn-circle hover:bg-primary/10 hover:text-primary transition-colors">
                             <HistoryIcon className="size-5" />
                         </button>
-                        <div className="avatar placeholder hidden sm:flex">
-                            <div className="bg-primary/20 text-primary rounded-xl w-10 border border-primary/30">
+
+                        {isFullScreen && (
+                            <button onClick={() => setIsFullScreen(false)} className="btn btn-ghost btn-sm btn-circle hover:bg-white/10 text-white">
+                                <ArrowLeftIcon className="size-5" />
+                            </button>
+                        )}
+
+                        <div className="hidden sm:flex avatar placeholder">
+                            <div className="bg-primary/10 text-primary rounded-xl w-11 border border-primary/20 shadow-inner">
                                 <BotIcon className="size-6" />
                             </div>
                         </div>
-                        <div>
-                            <h1 className="text-lg font-black tracking-tight text-white">AeroSonix <span className="text-primary">Assistant</span></h1>
-                            <div className="flex items-center gap-2">
-                                <div className="badge badge-success badge-xs animate-pulse"></div>
-                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.1em]">Neural Core Online</span>
+
+                        <div className="flex flex-col">
+                            <h1 className="text-base md:text-lg font-black tracking-tighter text-white uppercase leading-none">AeroSonix <span className="text-primary tracking-widest ml-1">AI</span></h1>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                                <div className="size-1.5 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                                <span className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">{module} Core</span>
                             </div>
                         </div>
                     </div>
 
-                    <div className="flex-none gap-2 sm:gap-4">
+                    <div className="flex-none gap-2">
+                        {/* Visibility Toggle */}
                         <button
-                            onClick={handleNewChat}
-                            className="btn btn-sm btn-ghost border border-white/10 hidden md:flex items-center gap-2 text-[10px] font-black uppercase hover:bg-primary/20"
+                            onClick={() => setIsChatHidden(!isChatHidden)}
+                            className={`btn btn-sm btn-ghost btn-circle border border-white/5 ${isChatHidden ? 'bg-primary/20 text-primary ring-1 ring-primary/40' : 'text-white/40'}`}
+                            title={isChatHidden ? "Show Chat" : "Voice-Only Mode"}
                         >
-                            <PlusIcon className="size-3" /> New Session
+                            {isChatHidden ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
                         </button>
 
-                        {/* Voice Dropdown */}
-                        <div className="dropdown dropdown-end">
-                            <label tabIndex={0} className="btn btn-ghost btn-sm border border-white/10 flex items-center gap-2 text-xs font-bold bg-white/5">
-                                <MicIcon className="size-3 text-primary" /> {selectedVoice?.voiceName || "Voice"} <ChevronDownIcon className="size-3" />
+                        {/* Full Screen Toggle */}
+                        <button
+                            onClick={() => setIsFullScreen(!isFullScreen)}
+                            className="btn btn-sm btn-ghost btn-circle border border-white/5 text-white/40 hover:text-white transition-all"
+                            title={isFullScreen ? "Minimize" : "Expand Interface"}
+                        >
+                            {isFullScreen ? <Minimize2Icon className="size-4" /> : <Maximize2Icon className="size-4" />}
+                        </button>
+
+                        <div className="h-6 w-[1px] bg-white/5 mx-1"></div>
+
+                        {/* Configuration Dropdowns */}
+                        <div className="dropdown dropdown-end hidden md:block">
+                            <label tabIndex={0} className="btn btn-ghost btn-sm border border-white/5 text-[10px] font-black uppercase tracking-widest px-4 bg-white/5 rounded-full">
+                                <MicIcon className="size-3 text-primary mr-1" /> {selectedVoice?.voiceName?.split(' ')[0] || "Default"}
                             </label>
-                            <ul tabIndex={0} className="dropdown-content z-[30] menu p-2 shadow-2xl bg-slate-900 border border-white/10 rounded-xl w-48 mt-4">
-                                {voices.map((v) => (
+                            <ul tabIndex={0} className="dropdown-content z-30 menu p-2 shadow-2xl bg-slate-900 border border-white/10 rounded-2xl w-48 mt-4 animate-in slide-in-from-top-2 duration-200">
+                                {voices.slice(0, 10).map((v) => (
                                     <li key={v.voiceId}>
-                                        <button
-                                            onClick={() => setSelectedVoice(v)}
-                                            className={`flex items-center justify-between font-bold py-3 ${selectedVoice?.voiceId === v.voiceId ? "bg-primary text-white" : "hover:bg-white/5"}`}
-                                        >
-                                            {v.voiceName}
-                                            {selectedVoice?.voiceId === v.voiceId && <CheckIcon className="size-3.5" />}
-                                        </button>
+                                        <button onClick={() => setSelectedVoice(v)} className={`font-bold text-xs py-3 ${selectedVoice?.voiceId === v.voiceId ? "bg-primary text-white" : "hover:bg-white/5"}`}>{v.voiceName}</button>
                                     </li>
                                 ))}
                             </ul>
                         </div>
 
                         <div className="dropdown dropdown-end">
-                            <label tabIndex={0} className="btn btn-ghost btn-sm border border-white/10 flex items-center gap-2 text-xs font-bold bg-white/5">
-                                {voiceLang.label} <ChevronDownIcon className="size-3" />
+                            <label tabIndex={0} className="btn btn-ghost btn-sm border border-white/5 text-[10px] font-black uppercase tracking-widest px-4 bg-white/5 rounded-full">
+                                {voiceLang.code.split('-')[0]}
                             </label>
-                            <ul tabIndex={0} className="dropdown-content z-[30] menu p-2 shadow-2xl bg-slate-900 border border-white/10 rounded-xl w-52 mt-4 max-h-80 overflow-y-auto">
+                            <ul tabIndex={0} className="dropdown-content z-30 menu p-2 shadow-2xl bg-slate-900 border border-white/10 rounded-2xl w-52 mt-4 max-h-80 overflow-y-auto">
                                 {VOICE_LANGUAGES.map((l) => (
                                     <li key={l.code}>
-                                        <button onClick={() => setVoiceLang(l)} className={`flex items-center justify-between font-bold py-3 ${voiceLang.code === l.code ? "bg-primary text-white" : "hover:bg-white/5"}`}>
-                                            {l.label}
-                                            {voiceLang.code === l.code && <CheckIcon className="size-3.5" />}
-                                        </button>
+                                        <button onClick={() => setVoiceLang(l)} className={`font-bold text-xs py-3 ${voiceLang.code === l.code ? "bg-primary text-white" : "hover:bg-white/5"}`}>{l.label}</button>
                                     </li>
                                 ))}
                             </ul>
@@ -571,44 +618,42 @@ const AiRobotShell = () => {
                     </div>
                 </header>
 
-                <main ref={scrollRef} className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 scroll-smooth custom-scrollbar bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-900/50 via-slate-950 to-black">
+                {/* Primary Chat Body (Only Scrollable Area) */}
+                <main ref={scrollRef} className={`flex-1 overflow-y-auto p-6 md:p-12 space-y-10 scroll-smooth custom-scrollbar relative bg-slate-950 transition-opacity duration-500 ${isChatHidden ? 'opacity-0' : 'opacity-100'}`}>
+                    {/* Visual Flourish Background */}
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,_rgba(59,130,246,0.03)_0%,_transparent_50%)] pointer-events-none"></div>
+
                     {messages.length === 0 && (
-                        <div className="flex flex-col items-center justify-center h-full text-center space-y-6">
+                        <div className="flex flex-col items-center justify-center h-full text-center space-y-8 animate-in fade-in duration-1000">
                             <div className="relative">
-                                <div className="absolute inset-0 bg-primary/20 blur-[100px] rounded-full"></div>
-                                <div className="relative p-12 bg-slate-900/50 border border-white/10 rounded-[3rem] shadow-3xl">
-                                    <SparklesIcon className="size-20 text-primary animate-pulse" />
+                                <div className="absolute inset-0 bg-primary/20 blur-[120px] rounded-full animate-pulse"></div>
+                                <div className="relative p-10 bg-slate-900/40 border border-white/10 rounded-[3rem] shadow-3xl ring-1 ring-white/5">
+                                    <SparklesIcon className="size-16 text-primary animate-[spin_4s_linear_infinite]" />
                                 </div>
                             </div>
-                            <div className="max-w-md space-y-4">
-                                <h2 className="text-3xl font-black text-white tracking-widest uppercase">System Initialization</h2>
-                                <p className="text-slate-400 font-medium italic leading-relaxed">
-                                    "I am AeroSonix Voice Assistant. Memory linked to MongoDB. All sessions are now persistent."
-                                </p>
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-sm mt-8">
-                                <div className="p-4 bg-white/5 rounded-2xl border border-white/5 text-[10px] font-bold text-slate-500 text-center uppercase tracking-widest">Multi-Session Core</div>
-                                <div className="p-4 bg-white/5 rounded-2xl border border-white/5 text-[10px] font-bold text-slate-500 text-center uppercase tracking-widest">Persistent Storage</div>
+                            <div className="max-w-md space-y-3">
+                                <h2 className="text-2xl font-black text-white tracking-widest uppercase">Neural Core Online</h2>
+                                <p className="text-slate-500 font-medium italic leading-relaxed text-sm">"Session synchronized. Standing by for vocal or textual instructions."</p>
                             </div>
                         </div>
                     )}
 
                     {messages.map((m, i) => (
-                        <div key={i} className={`chat ${m.role === "user" ? "chat-end" : "chat-start"} group animate-in fade-in slide-in-from-bottom-4 duration-500`}>
+                        <div key={i} className={`chat ${m.role === "user" ? "chat-end" : "chat-start"} animate-in fade-in slide-in-from-bottom-6 duration-700`}>
                             <div className="chat-image avatar">
-                                <div className={`w-10 rounded-2xl p-2 shadow-2xl ${m.role === 'user' ? 'bg-indigo-600' : 'bg-slate-800'}`}>
+                                <div className={`w-10 rounded-2xl p-2.5 shadow-2xl ring-1 ring-white/10 transition-transform hover:scale-110 ${m.role === 'user' ? 'bg-indigo-600' : 'bg-slate-800'}`}>
                                     {m.role === "user" ? <CircleIcon className="size-full text-white" /> : <BotIcon className="size-full text-primary" />}
                                 </div>
                             </div>
-                            <div className="chat-header opacity-50 text-[10px] font-black uppercase mb-1 tracking-tighter">
-                                {m.role === "user" ? "User" : "AeroSonix Assistant"}
-                                <time className="text-[10px] opacity-30 ml-2">{m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""}</time>
+                            <div className="chat-header opacity-30 text-[9px] font-black uppercase mb-1.5 tracking-[0.2em] px-1">
+                                {m.role === "user" ? "Integrator" : "System Response"}
+                                <time className="ml-2 opacity-50">{m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""}</time>
                             </div>
-                            <div className={`chat-bubble text-sm md:text-[15px] font-medium leading-relaxed border-0 shadow-xl py-4 px-6 mb-2
-                                ${m.role === "user" ? "bg-indigo-600 text-white rounded-tr-none" : m.isError ? "bg-rose-950/40 text-rose-400 border border-rose-900/50 italic whitespace-pre-wrap" : "bg-slate-800/80 backdrop-blur-md text-slate-100 rounded-tl-none border border-white/5"}
+                            <div className={`chat-bubble text-sm md:text-[15px] font-medium leading-relaxed border-0 shadow-2xl py-5 px-7 mb-2 transition-all group
+                                ${m.role === "user" ? "bg-indigo-600 text-white rounded-3xl rounded-tr-none" : m.isError ? "bg-rose-950/40 text-rose-400 border-rose-900/50 italic" : "bg-slate-900/80 backdrop-blur-xl text-slate-100 rounded-3xl rounded-tl-none border border-white/5"}
                             `}>
                                 {m.role === 'assistant' && !m.isError ? (
-                                    <div className="prose prose-sm prose-invert max-w-none prose-p:leading-relaxed prose-p:my-2 prose-headings:text-primary prose-headings:font-black prose-headings:tracking-tight prose-headings:mt-4 prose-headings:mb-2 prose-ul:my-3 prose-li:my-1 prose-ul:list-disc prose-ul:pl-5 prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10 prose-pre:rounded-2xl prose-pre:my-4 prose-strong:text-white prose-strong:font-black">
+                                    <div className="prose prose-sm prose-invert max-w-none prose-p:leading-relaxed prose-code:text-primary prose-pre:bg-black/60 prose-pre:rounded-2xl">
                                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
                                     </div>
                                 ) : (
@@ -618,108 +663,102 @@ const AiRobotShell = () => {
                         </div>
                     ))}
                     {isTyping && (
-                        <div className="chat chat-start">
-                            <div className="chat-image avatar">
-                                <div className="w-10 rounded-2xl p-2 bg-slate-800 animate-pulse"><BotIcon className="size-full text-primary" /></div>
-                            </div>
-                            <div className="chat-bubble bg-slate-800/40 border border-primary/20 backdrop-blur-md flex items-center gap-4 py-4 px-6 rounded-tl-none ring-1 ring-primary/10">
+                        <div className="chat chat-start animate-pulse">
+                            <div className="chat-bubble bg-slate-900/50 border border-primary/20 backdrop-blur-lg flex items-center gap-4 py-4 px-6 rounded-3xl rounded-tl-none">
                                 <div className="flex gap-1.5 items-center">
-                                    <span className="size-2 bg-primary rounded-full animate-bounce [animation-delay:-0.3s]" />
-                                    <span className="size-2 bg-primary rounded-full animate-bounce [animation-delay:-0.15s]" />
-                                    <span className="size-2 bg-primary rounded-full animate-bounce" />
+                                    <span className="size-1.5 bg-primary rounded-full animate-bounce" />
+                                    <span className="size-1.5 bg-primary rounded-full animate-bounce [animation-delay:-0.15s]" />
+                                    <span className="size-1.5 bg-primary rounded-full animate-bounce [animation-delay:-0.3s]" />
                                 </div>
-                                <span className="text-[11px] text-primary font-black uppercase tracking-[0.2em] font-mono">Cerebras Active...</span>
+                                <span className="text-[10px] text-primary/60 font-black uppercase tracking-widest font-mono italic">Synchronizing...</span>
                             </div>
                         </div>
                     )}
                 </main>
 
-                <footer className="p-6 md:p-8 bg-slate-900 border-t border-white/5 space-y-6">
-                    {translatedPreview && (
-                        <div className="alert bg-primary/10 border-primary/20 rounded-2xl py-3 animate-in slide-in-from-bottom-2 duration-300">
-                            <div className="flex flex-col items-start gap-1 w-full">
-                                <div className="flex items-center gap-2 mb-1">
-                                    <ZapIcon className="size-3 text-primary" />
-                                    <span className="text-[10px] font-black uppercase tracking-widest text-primary/80">Real-time Translation</span>
-                                </div>
-                                <p className="text-sm text-slate-200 font-semibold italic">"{translatedPreview}"</p>
-                            </div>
-                        </div>
-                    )}
-
-                    <div className="flex items-center gap-6">
-                        <div className="relative group flex items-center justify-center">
-                            {voiceState === "listening" && (
-                                <div className="absolute pointer-events-none">
-                                    <div className="size-24 bg-primary/30 rounded-full animate-[ping_2s_linear_infinite] blur-2xl" />
-                                    <div className="size-28 bg-primary/20 rounded-full animate-[ping_3s_linear_infinite] [animation-delay:1s] blur-3xl" />
-                                </div>
-                            )}
-                            <button
-                                onClick={handleMicClick}
-                                className={`btn btn-circle btn-lg relative z-10 size-16 md:size-20 transition-all duration-500 border-none
-                                    ${voiceState === "idle" ? "bg-slate-800 text-slate-400 hover:bg-primary/20 hover:text-primary" : ""}
-                                    ${voiceState === "listening" ? "bg-primary text-white shadow-[0_0_50px_rgba(59,130,246,0.6)]" : ""}
-                                    ${voiceState === "processing" ? "bg-slate-700 text-slate-100" : ""}
-                                    ${voiceState === "speaking" ? "bg-cyan-500 text-white shadow-[0_0_30px_rgba(6,182,212,0.4)]" : ""}
-                                    ${voiceState === "error" ? "bg-rose-600 text-white" : ""}
-                                `}
-                            >
-                                {voiceState === "idle" && <MicIcon className="size-8" />}
-                                {voiceState === "listening" && <CircleIcon className="size-9 fill-current animate-pulse" />}
-                                {voiceState === "processing" && <Loader2Icon className="size-9 animate-spin" />}
-                                {voiceState === "speaking" && (
-                                    <div className="flex items-end gap-1.5 h-8">
-                                        <div className="w-1.5 bg-white animate-[equalizer_0.7s_ease_infinite] h-2 rounded-full" />
-                                        <div className="w-1.5 bg-white animate-[equalizer_0.5s_ease_infinite] h-6 rounded-full" />
-                                        <div className="w-1.5 bg-white animate-[equalizer_0.8s_ease_infinite] h-full rounded-full" />
-                                        <div className="w-1.5 bg-white animate-[equalizer_0.6s_ease_infinite] h-4 rounded-full" />
+                {/* Fixed Non-Scrollable Footer */}
+                <footer className="p-6 md:p-10 bg-slate-950 border-t border-white/5 shrink-0 z-20">
+                    <div className="max-w-4xl mx-auto space-y-6">
+                        {translatedPreview && (
+                            <div className="alert bg-primary/10 border-primary/20 rounded-2xl py-3 animate-in slide-in-from-bottom-4 duration-500 shadow-lg">
+                                <div className="flex flex-col items-start gap-1 w-full">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <ZapIcon className="size-3 text-primary animate-pulse" />
+                                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-primary/80">Active Translation</span>
                                     </div>
-                                )}
-                                {voiceState === "error" && <AlertCircleIcon className="size-9" />}
-                            </button>
-                        </div>
-
-                        <div className="flex-1 join bg-slate-800/50 border border-white/5 p-1 rounded-full shadow-inner focus-within:border-primary/50 transition-all">
-                            <input
-                                type="text"
-                                value={inputText}
-                                onChange={(e) => setInputText(e.target.value)}
-                                onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                                placeholder={voiceState === 'listening' ? "Voice active..." : "Initiate command..."}
-                                className="input bg-transparent border-none outline-none focus:outline-none flex-1 text-white placeholder:text-slate-600 px-6 font-medium"
-                            />
-                            <div className="flex items-center h-10 my-auto mx-2 gap-2 border-l border-white/10 px-4">
-                                <div className="dropdown dropdown-top dropdown-end">
-                                    <label tabIndex={0} className="btn btn-ghost btn-xs text-[10px] font-bold text-slate-400 hover:text-primary">
-                                        {transLang ? transLang.label : "Native"} <ChevronDownIcon className="size-2.5" />
-                                    </label>
-                                    <ul tabIndex={0} className="dropdown-content z-[30] menu p-2 shadow-2xl bg-slate-900 border border-white/10 rounded-xl w-40 mb-3 max-h-60 overflow-y-auto">
-                                        <li><button onClick={() => setTransLang(null)} className="text-[10px] font-bold py-3 hover:bg-white/5">Auto (Native)</button></li>
-                                        <div className="divider my-0 opacity-10"></div>
-                                        {TRANSLATION_LANGUAGES.map((l) => (
-                                            <li key={l.code}>
-                                                <button onClick={() => setTransLang(l)} className={`text-[10px] font-bold py-3 ${transLang?.code === l.code ? "text-primary" : "hover:bg-white/5"}`}>
-                                                    {l.label}
-                                                </button>
-                                            </li>
-                                        ))}
-                                    </ul>
+                                    <p className="text-sm text-slate-300 font-bold italic">"{translatedPreview}"</p>
                                 </div>
                             </div>
-                            <button onClick={() => handleSend()} disabled={!inputText.trim() || isTyping} className="btn btn-primary btn-circle group">
-                                {isTyping ? <Loader2Icon className="size-5 animate-spin" /> : <SendIcon className="size-5 group-hover:translate-x-1 transition-transform" />}
-                            </button>
+                        )}
+
+                        <div className="flex items-center gap-6">
+                            <div className="relative">
+                                {voiceState === "listening" && (
+                                    <div className="absolute inset-0 bg-primary/40 rounded-full blur-3xl animate-[ping_2s_infinite]"></div>
+                                )}
+                                <button
+                                    onClick={handleMicClick}
+                                    className={`btn btn-circle btn-lg size-16 md:size-20 transition-all duration-700 relative z-10 border-none shadow-2xl
+                                        ${voiceState === "idle" ? "bg-slate-900 text-white/20 hover:bg-primary/20 hover:text-primary hover:scale-110" : ""}
+                                        ${voiceState === "listening" ? "bg-primary text-white scale-125 hover:rotate-6" : ""}
+                                        ${voiceState === "processing" ? "bg-slate-800 text-primary rotate-180" : ""}
+                                        ${voiceState === "speaking" ? "bg-cyan-500 text-white shadow-[0_0_50px_rgba(6,182,212,0.4)]" : ""}
+                                        ${voiceState === "error" ? "bg-rose-600 text-white" : ""}
+                                    `}
+                                >
+                                    {voiceState === "idle" && <MicIcon className="size-8 transition-transform group-hover:scale-125" />}
+                                    {voiceState === "listening" && <CircleIcon className="size-10 fill-current animate-pulse ring-8 ring-white/10 rounded-full" />}
+                                    {voiceState === "processing" && <Loader2Icon className="size-10 animate-spin" />}
+                                    {voiceState === "speaking" && (
+                                        <div className="flex items-center gap-1.5 h-10">
+                                            {[...Array(5)].map((_, i) => (
+                                                <div key={i} className={`w-1 bg-white rounded-full animate-[equalizer_0.7s_ease_infinite]`} style={{ animationDelay: `${i * 0.1}s`, height: '50%' }} />
+                                            ))}
+                                        </div>
+                                    )}
+                                    {voiceState === "error" && <AlertCircleIcon className="size-10" />}
+                                </button>
+                            </div>
+
+                            <div className="flex-1 flex bg-slate-900/80 border border-white/5 p-1 rounded-full shadow-2xl focus-within:ring-2 ring-primary/30 transition-all">
+                                <input
+                                    type="text"
+                                    value={inputText}
+                                    onChange={(e) => setInputText(e.target.value)}
+                                    onKeyDown={(e) => e.key === "Enter" && handleSend()}
+                                    placeholder={voiceState === 'listening' ? "Link established. Speak..." : "Input command sequence..."}
+                                    className="input bg-transparent border-none outline-none focus:outline-none flex-1 text-white placeholder:text-slate-600 px-8 font-bold text-sm tracking-wide"
+                                />
+                                <div className="flex items-center gap-3 pr-4 border-l border-white/10 ml-4">
+                                    <div className="dropdown dropdown-top dropdown-end">
+                                        <label tabIndex={0} className="btn btn-ghost btn-xs text-[9px] font-black tracking-widest text-slate-500 hover:text-primary p-0 h-auto uppercase">
+                                            {transLang ? transLang.label : "Native"}
+                                        </label>
+                                        <ul tabIndex={0} className="dropdown-content z-30 menu p-3 shadow-2xl bg-slate-900 border border-white/10 rounded-2xl w-44 mb-4">
+                                            <li><button onClick={() => setTransLang(null)} className="text-[10px] font-black py-4 uppercase">Direct Link</button></li>
+                                            <div className="divider my-0 opacity-10"></div>
+                                            {TRANSLATION_LANGUAGES.slice(0, 8).map((l) => (
+                                                <li key={l.code}><button onClick={() => setTransLang(l)} className="text-[10px] font-black py-4 uppercase">{l.label}</button></li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                    <button onClick={() => handleSend()} disabled={!inputText.trim() || isTyping} className="btn btn-primary btn-circle size-11 shadow-lg ring-4 ring-primary/20 hover:scale-110 transition-transform">
+                                        {isTyping ? <Loader2Icon className="size-5 animate-spin" /> : <SendIcon className="size-5" />}
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </footer>
             </div>
 
             <style>{`
-                @keyframes equalizer { 0%, 100% { height: 8px; } 50% { height: 100%; } }
-                .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+                @keyframes equalizer { 0%, 100% { height: 10px; } 50% { height: 100%; } }
+                @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                .custom-scrollbar::-webkit-scrollbar { width: 5px; }
                 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-                .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(59, 130, 246, 0.2); border-radius: 10px; }
+                .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(59, 130, 246, 0.1); border-radius: 20px; border: 1px solid rgba(255,255,255,0.05); }
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(59, 130, 246, 0.3); }
             `}</style>
         </div>
     );
