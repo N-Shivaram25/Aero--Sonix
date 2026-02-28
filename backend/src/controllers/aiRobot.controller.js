@@ -62,14 +62,48 @@ FORMATTING RULES:
 
 export async function getVoices(req, res) {
   const speakers = [
+    // MALE VOICES 
     { voiceId: "shubh", voiceName: "Shubh (Male) - Default", isDefault: true },
-    { voiceId: "ritu", voiceName: "Ritu (Female)", isDefault: false },
     { voiceId: "aditya", voiceName: "Aditya (Male)", isDefault: false },
-    { voiceId: "priya", voiceName: "Priya (Female)", isDefault: false },
+    { voiceId: "rahul", voiceName: "Rahul (Male)", isDefault: false },
+    { voiceId: "rohan", voiceName: "Rohan (Male)", isDefault: false },
     { voiceId: "amit", voiceName: "Amit (Male)", isDefault: false },
-    { voiceId: "simran", voiceName: "Simran (Female)", isDefault: false },
+    { voiceId: "dev", voiceName: "Dev (Male)", isDefault: false },
+    { voiceId: "ratan", voiceName: "Ratan (Male)", isDefault: false },
+    { voiceId: "varun", voiceName: "Varun (Male)", isDefault: false },
+    { voiceId: "manan", voiceName: "Manan (Male)", isDefault: false },
     { voiceId: "sumit", voiceName: "Sumit (Male)", isDefault: false },
+    { voiceId: "kabir", voiceName: "Kabir (Male)", isDefault: false },
+    { voiceId: "aayan", voiceName: "Aayan (Male)", isDefault: false },
+    { voiceId: "ashutosh", voiceName: "Ashutosh (Male)", isDefault: false },
+    { voiceId: "advait", voiceName: "Advait (Male)", isDefault: false },
+    { voiceId: "anand", voiceName: "Anand (Male)", isDefault: false },
+    { voiceId: "tarun", voiceName: "Tarun (Male)", isDefault: false },
+    { voiceId: "sunny", voiceName: "Sunny (Male)", isDefault: false },
+    { voiceId: "mani", voiceName: "Mani (Male)", isDefault: false },
+    { voiceId: "gokul", voiceName: "Gokul (Male)", isDefault: false },
+    { voiceId: "vijay", voiceName: "Vijay (Male)", isDefault: false },
+    { voiceId: "mohit", voiceName: "Mohit (Male)", isDefault: false },
+    { voiceId: "rehan", voiceName: "Rehan (Male)", isDefault: false },
+    { voiceId: "soham", voiceName: "Soham (Male)", isDefault: false },
+
+    // FEMALE VOICES
+    { voiceId: "ritu", voiceName: "Ritu (Female)", isDefault: false },
+    { voiceId: "priya", voiceName: "Priya (Female)", isDefault: false },
+    { voiceId: "neha", voiceName: "Neha (Female)", isDefault: false },
+    { voiceId: "pooja", voiceName: "Pooja (Female)", isDefault: false },
+    { voiceId: "simran", voiceName: "Simran (Female)", isDefault: false },
     { voiceId: "kavya", voiceName: "Kavya (Female)", isDefault: false },
+    { voiceId: "ishita", voiceName: "Ishita (Female)", isDefault: false },
+    { voiceId: "shreya", voiceName: "Shreya (Female)", isDefault: false },
+    { voiceId: "roopa", voiceName: "Roopa (Female)", isDefault: false },
+    { voiceId: "amelia", voiceName: "Amelia (Female)", isDefault: false },
+    { voiceId: "sophia", voiceName: "Sophia (Female)", isDefault: false },
+    { voiceId: "tanya", voiceName: "Tanya (Female)", isDefault: false },
+    { voiceId: "shruti", voiceName: "Shruti (Female)", isDefault: false },
+    { voiceId: "suhani", voiceName: "Suhani (Female)", isDefault: false },
+    { voiceId: "kavitha", voiceName: "Kavitha (Female)", isDefault: false },
+    { voiceId: "rupali", voiceName: "Rupali (Female)", isDefault: false },
   ];
   return res.status(200).json({ success: true, voices: speakers });
 }
