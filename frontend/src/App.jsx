@@ -12,11 +12,7 @@ import AdminDashboardPage from "./pages/AdminDashboardPage.jsx";
 import ProfilePage from "./pages/ProfilePage.jsx";
 import FriendsPage from "./pages/FriendsPage.jsx";
 import ParticipantsPage from "./pages/ParticipantsPage.jsx";
-import AiRobotHomePage from "./pages/ai-robot/AiRobotHomePage.jsx";
-import AiRobotInterviewPage from "./pages/ai-robot/AiRobotInterviewPage.jsx";
-import AiRobotEnglishFluencyPage from "./pages/ai-robot/AiRobotEnglishFluencyPage.jsx";
-import AiRobotLanguageLearningPage from "./pages/ai-robot/AiRobotLanguageLearningPage.jsx";
-import AiRobotProgrammingPage from "./pages/ai-robot/AiRobotProgrammingPage.jsx";
+import AiRobotShell from "./pages/ai-robot/AiRobotShell.jsx";
 
 import { Toaster } from "react-hot-toast";
 
@@ -136,7 +132,7 @@ const App = () => {
         element={
           isAuthenticated && isOnboarded ? (
             <Layout showSidebar={true}>
-              <AiRobotHomePage />
+              <AiRobotShell />
             </Layout>
           ) : (
             <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
@@ -149,7 +145,7 @@ const App = () => {
         element={
           isAuthenticated && isOnboarded ? (
             <Layout showSidebar={true}>
-              <AiRobotInterviewPage />
+              <AiRobotShell />
             </Layout>
           ) : (
             <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
@@ -162,7 +158,7 @@ const App = () => {
         element={
           isAuthenticated && isOnboarded ? (
             <Layout showSidebar={true}>
-              <AiRobotEnglishFluencyPage />
+              <AiRobotShell />
             </Layout>
           ) : (
             <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
@@ -175,7 +171,7 @@ const App = () => {
         element={
           isAuthenticated && isOnboarded ? (
             <Layout showSidebar={true}>
-              <AiRobotLanguageLearningPage />
+              <AiRobotShell />
             </Layout>
           ) : (
             <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
@@ -188,7 +184,7 @@ const App = () => {
         element={
           isAuthenticated && isOnboarded ? (
             <Layout showSidebar={true}>
-              <AiRobotProgrammingPage />
+              <AiRobotShell />
             </Layout>
           ) : (
             <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />

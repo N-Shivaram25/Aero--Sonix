@@ -103,9 +103,8 @@ const Sidebar = ({ collapsed = false, onToggleCollapsed }) => {
         <Link
           to="/"
           onClick={closeDrawer}
-          className={`btn btn-ghost justify-start w-full gap-3 px-3 normal-case ${
-            currentPath === "/" ? "btn-active" : ""
-          }`}
+          className={`btn btn-ghost justify-start w-full gap-3 px-3 normal-case ${currentPath === "/" ? "btn-active" : ""
+            }`}
         >
           <HomeIcon className="size-5 text-base-content opacity-70" />
           {!collapsed ? <span>Home</span> : null}
@@ -114,9 +113,8 @@ const Sidebar = ({ collapsed = false, onToggleCollapsed }) => {
         <Link
           to="/friends"
           onClick={closeDrawer}
-          className={`btn btn-ghost justify-start w-full gap-3 px-3 normal-case ${
-            currentPath === "/friends" ? "btn-active" : ""
-          }`}
+          className={`btn btn-ghost justify-start w-full gap-3 px-3 normal-case ${currentPath === "/friends" ? "btn-active" : ""
+            }`}
         >
           <UsersIcon className="size-5 text-base-content opacity-70" />
           {!collapsed ? <span>Friends</span> : null}
@@ -125,9 +123,8 @@ const Sidebar = ({ collapsed = false, onToggleCollapsed }) => {
         <Link
           to="/participants"
           onClick={closeDrawer}
-          className={`btn btn-ghost justify-start w-full gap-3 px-3 normal-case ${
-            currentPath === "/participants" ? "btn-active" : ""
-          }`}
+          className={`btn btn-ghost justify-start w-full gap-3 px-3 normal-case ${currentPath === "/participants" ? "btn-active" : ""
+            }`}
         >
           <UsersIcon className="size-5 text-base-content opacity-70" />
           {!collapsed ? <span>Participants</span> : null}
@@ -136,9 +133,8 @@ const Sidebar = ({ collapsed = false, onToggleCollapsed }) => {
         <Link
           to="/notifications"
           onClick={closeDrawer}
-          className={`btn btn-ghost justify-start w-full gap-3 px-3 normal-case ${
-            currentPath === "/notifications" ? "btn-active" : ""
-          }`}
+          className={`btn btn-ghost justify-start w-full gap-3 px-3 normal-case ${currentPath === "/notifications" ? "btn-active" : ""
+            }`}
         >
           <BellIcon className="size-5 text-base-content opacity-70" />
           {!collapsed ? (
@@ -154,12 +150,11 @@ const Sidebar = ({ collapsed = false, onToggleCollapsed }) => {
         <Link
           to="/ai-robot/home"
           onClick={closeDrawer}
-          className={`btn btn-ghost justify-start w-full gap-3 px-3 normal-case ${
-            currentPath.startsWith("/ai-robot") ? "btn-active" : ""
-          }`}
+          className={`btn btn-ghost justify-start w-full gap-3 px-3 normal-case ${currentPath.startsWith("/ai-robot") ? "btn-active" : ""
+            }`}
         >
           <BotIcon className="size-5 text-base-content opacity-70" />
-          {!collapsed ? <span>AI Robot</span> : null}
+          {!collapsed ? <span>AI - Assistance</span> : null}
         </Link>
       </nav>
 
@@ -172,9 +167,8 @@ const Sidebar = ({ collapsed = false, onToggleCollapsed }) => {
                 <img src={authUser?.profilePic} alt="User Avatar" />
               </div>
               <span
-                className={`absolute -bottom-0.5 -right-0.5 size-3 rounded-full border-2 border-base-200 ${
-                  onlineMap?.[authUser?._id] ? "bg-success" : "bg-neutral-500"
-                }`}
+                className={`absolute -bottom-0.5 -right-0.5 size-3 rounded-full border-2 border-base-200 ${onlineMap?.[authUser?._id] ? "bg-success" : "bg-neutral-500"
+                  }`}
                 title={onlineMap?.[authUser?._id] ? "Online" : "Offline"}
               />
             </div>
@@ -182,9 +176,8 @@ const Sidebar = ({ collapsed = false, onToggleCollapsed }) => {
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-sm truncate">{authUser?.fullName}</p>
                 <p
-                  className={`text-xs flex items-center gap-1 mt-1 ${
-                    onlineMap?.[authUser?._id] ? "text-success" : "text-neutral-500"
-                  }`}
+                  className={`text-xs flex items-center gap-1 mt-1 ${onlineMap?.[authUser?._id] ? "text-success" : "text-neutral-500"
+                    }`}
                 >
                   {onlineMap?.[authUser?._id] ? "Online" : "Offline"}
                 </p>

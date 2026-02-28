@@ -273,17 +273,18 @@ export async function aiRobotSendConversationMessage({ conversationId, message, 
   return response.data;
 }
 
-export async function aiRobotStt({ audioBlob }) {
+export async function aiRobotStt({ audioBlob, languageCode }) {
   const form = new FormData();
   form.append("audio", audioBlob, "audio.webm");
+  if (languageCode) form.append("languageCode", languageCode);
   const response = await axiosInstance.post("/ai-robot/stt", form, {
     headers: { "Content-Type": "multipart/form-data" },
   });
   return response.data;
 }
 
-export async function aiRobotTranslate({ text, targetLanguage, sourceLanguage }) {
-  const response = await axiosInstance.post("/ai-robot/translate", { text, targetLanguage, sourceLanguage });
+export async function aiRobotTranslate({ text, targetLanguageCode, sourceLanguageCode }) {
+  const response = await axiosInstance.post("/ai-robot/translate", { text, targetLanguageCode, sourceLanguageCode });
   return response.data;
 }
 
@@ -292,10 +293,10 @@ export async function aiRobotSendMessage({ message, module, language }) {
   return response.data;
 }
 
-export async function aiRobotTts({ text, voiceId, voiceGender }) {
+export async function aiRobotTts({ text, languageCode, speaker }) {
   const response = await axiosInstance.post(
     "/ai-robot/tts",
-    { text, voiceId, voiceGender },
+    { text, languageCode, speaker },
     {
       responseType: "arraybuffer",
     }
