@@ -273,9 +273,9 @@ const AiRobotShell = () => {
     };
 
     return (
-        <div className="flex flex-col h-full bg-slate-950 text-slate-100 overflow-hidden font-sans">
-            {/* Professional Header */}
-            <header className="navbar bg-slate-900/50 backdrop-blur-xl border-b border-white/5 px-6 shrink-0">
+        <div className="flex flex-col h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
+            {/* Professional Header - Static at top */}
+            <header className="navbar bg-slate-900/50 backdrop-blur-xl border-b border-white/5 px-6 shrink-0 z-20">
                 <div className="flex-1 gap-4">
                     <div className="avatar placeholder">
                         <div className="bg-primary/20 text-primary rounded-xl w-10 border border-primary/30 shadow-[0_0_15px_rgba(59,130,246,0.2)]">
