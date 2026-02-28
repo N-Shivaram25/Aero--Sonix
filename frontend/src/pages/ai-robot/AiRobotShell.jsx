@@ -247,15 +247,39 @@ const AiRobotShell = () => {
             });
 
             if (res.success) {
-                const aiMsg = { role: "assistant", text: res.reply, timestamp: new Date() };
-                setMessages((prev) => [...prev, aiMsg]);
+                const fullReply = res.reply;
+                const aiMsg = { role: "assistant", text: "", timestamp: new Date() };
 
-                // Update conversation title in list if it changed
+                // 1. Initiate parallel TTS stream immediately
+                handleTts(fullReply);
+
+                // 2. Start Parallel Typewriter Effect
+                setMessages((prev) => [...prev, aiMsg]);
+                const words = fullReply.split(" ");
+                let currentText = "";
+                let wordIndex = 0;
+
+                const typewriterInterval = setInterval(() => {
+                    if (wordIndex < words.length) {
+                        currentText += (wordIndex === 0 ? "" : " ") + words[wordIndex];
+                        setMessages((prev) => {
+                            const updated = [...prev];
+                            const lastIdx = updated.length - 1;
+                            if (updated[lastIdx] && updated[lastIdx].role === "assistant") {
+                                updated[lastIdx] = { ...updated[lastIdx], text: currentText };
+                            }
+                            return updated;
+                        });
+                        wordIndex++;
+                    } else {
+                        clearInterval(typewriterInterval);
+                    }
+                }, 65); // ~15 words per second
+
+                // 3. Update conversation title if needed
                 if (res.title) {
                     setConversations(prev => prev.map(c => c.id === currentId ? { ...c, title: res.title } : c));
                 }
-
-                handleTts(res.reply);
             } else {
                 throw new Error(res.message || "Failed to generate AI response.");
             }
