@@ -170,6 +170,7 @@ export async function deleteConversation(req, res) {
 }
 
 export async function sendConversationMessage(req, res) {
+  const logPrefix = `[AEROSONIX-AI][CONVO][${new Date().toISOString()}]`;
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
@@ -182,55 +183,80 @@ export async function sendConversationMessage(req, res) {
 
     const language = String(req.body?.language || "English").trim();
 
+    console.log(`${logPrefix} Session: ${id}, User: ${userId}, Msg: "${message.slice(0, 50)}..."`);
+
     const convo = await AiRobotConversation.findOne({ _id: id, userId }).select("module title messages");
-    if (!convo) return res.status(404).json({ message: "Conversation not found" });
+    if (!convo) {
+      console.error(`${logPrefix} Conversation ${id} not found for user ${userId}`);
+      return res.status(404).json({ message: "Conversation not found" });
+    }
 
     const module = normalizeModule(convo.module);
     const systemPrompt = buildSystemPrompt({ module, language });
 
     const prior = Array.isArray(convo.messages) ? convo.messages : [];
-    const trimmedContext = prior.slice(-15).map((m) => ({ role: m.role, content: m.text }));
+    const trimmedContext = prior.slice(-12).map((m) => ({ role: m.role, content: m.text }));
 
     const apiKey = (process.env.CEREBRAS_API_KEY || "").trim();
     if (!apiKey) {
-      return res.status(500).json({ message: "Cerebras API key missing on server." });
+      console.error(`${logPrefix} Missing CEREBRAS_API_KEY`);
+      return res.status(500).json({ message: "Server AI configuration missing." });
     }
 
     const cerebras = new Cerebras({ apiKey });
-    const completion = await cerebras.chat.completions.create({
-      model: CEREBRAS_MODEL,
-      temperature: 0.7,
-      max_completion_tokens: 4096,
-      messages: [{ role: "system", content: systemPrompt }, ...trimmedContext, { role: "user", content: message }],
-    });
 
-    const reply = completion?.choices?.[0]?.message?.content?.trim() || "";
-    const nextTitle = convo.title === "New chat" ? toTitleFromMessage(message) : convo.title;
+    try {
+      console.log(`${logPrefix} Requesting Cerebras GPT-OSS...`);
+      const completion = await cerebras.chat.completions.create({
+        model: CEREBRAS_MODEL,
+        temperature: 0.7,
+        max_completion_tokens: 4096,
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...trimmedContext,
+          { role: "user", content: message }
+        ],
+      });
 
-    await AiRobotConversation.findOneAndUpdate(
-      { _id: id, userId },
-      {
-        $set: { title: nextTitle },
-        $push: {
-          messages: {
-            $each: [
-              { role: "user", text: message },
-              { role: "assistant", text: reply || "" },
-            ],
+      const reply = completion?.choices?.[0]?.message?.content?.trim() || "";
+      if (!reply) throw new Error("Empty reply from Cerebras");
+
+      console.log(`${logPrefix} Reply generated successfully.`);
+
+      const nextTitle = convo.title === "New chat" ? toTitleFromMessage(message) : convo.title;
+
+      await AiRobotConversation.findOneAndUpdate(
+        { _id: id, userId },
+        {
+          $set: { title: nextTitle },
+          $push: {
+            messages: {
+              $each: [
+                { role: "user", text: message },
+                { role: "assistant", text: reply },
+              ],
+            },
           },
         },
-      },
-      { new: true }
-    );
+        { new: true }
+      );
 
-    return res.status(200).json({
-      success: true,
-      module,
-      reply,
-      title: nextTitle,
-    });
+      return res.status(200).json({
+        success: true,
+        module,
+        reply,
+        title: nextTitle,
+      });
+
+    } catch (apiErr) {
+      console.error(`${logPrefix} Cerebras API Error:`, apiErr.message);
+      return res.status(502).json({
+        message: "AI service is currently busy or unavailable.",
+        details: apiErr.message
+      });
+    }
   } catch (error) {
-    console.error("Error in sendConversationMessage controller", error);
-    return res.status(500).json({ message: "Internal Server Error" });
+    console.error(`${logPrefix} Unhandled Error in sendConversationMessage:`, error);
+    return res.status(500).json({ message: "Internal Server Error in session processing." });
   }
 }
