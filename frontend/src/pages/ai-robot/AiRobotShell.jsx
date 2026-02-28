@@ -546,14 +546,14 @@ const AiRobotShell = () => {
             <div className="flex-1 flex flex-col h-full bg-slate-950 overflow-hidden relative">
 
                 {/* Fixed Non-Scrollable Header */}
-                <header className="navbar bg-slate-900/40 backdrop-blur-2xl border-b border-white/5 px-6 shrink-0 z-20">
-                    <div className="flex-1 gap-2 sm:gap-4 items-center">
-                        <button onClick={() => setIsHistoryOpen(true)} className="btn btn-ghost btn-sm btn-circle hover:bg-primary/10 hover:text-primary transition-colors">
+                <header className="navbar bg-slate-900/40 backdrop-blur-2xl border-b border-white/5 px-2 sm:px-6 shrink-0 z-20 h-16 sm:h-20">
+                    <div className="flex-1 gap-1 sm:gap-4 items-center overflow-hidden">
+                        <button onClick={() => setIsHistoryOpen(true)} className="btn btn-ghost btn-sm btn-circle hover:bg-primary/10 hover:text-primary transition-colors shrink-0">
                             <HistoryIcon className="size-5" />
                         </button>
 
                         {isFullScreen && (
-                            <button onClick={() => setIsFullScreen(false)} className="btn btn-ghost btn-sm btn-circle hover:bg-white/10 text-white">
+                            <button onClick={() => setIsFullScreen(false)} className="btn btn-ghost btn-sm btn-circle hover:bg-white/10 text-white shrink-0">
                                 <ArrowLeftIcon className="size-5" />
                             </button>
                         )}
@@ -564,11 +564,11 @@ const AiRobotShell = () => {
                             </div>
                         </div>
 
-                        <div className="flex flex-col">
-                            <h1 className="text-base md:text-lg font-black tracking-tighter text-white uppercase leading-none">AeroSonix <span className="text-primary tracking-widest ml-1">AI</span></h1>
+                        <div className="flex flex-col min-w-0">
+                            <h1 className="text-sm sm:text-lg font-black tracking-tighter text-white uppercase leading-none truncate overflow-hidden">AeroSonix <span className="text-primary tracking-widest ml-1 hidden xs:inline">AI</span></h1>
                             <div className="flex items-center gap-1.5 mt-0.5">
-                                <div className="size-1.5 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
-                                <span className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">{module} Core</span>
+                                <div className="size-1 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)] shrink-0"></div>
+                                <span className="text-[8px] sm:text-[10px] font-black text-white/30 uppercase tracking-[0.2em] truncate">{module} Core</span>
                             </div>
                         </div>
                     </div>
@@ -624,131 +624,175 @@ const AiRobotShell = () => {
                 </header>
 
                 {/* Primary Chat Body (Only Scrollable Area) */}
-                <main ref={scrollRef} className={`flex-1 overflow-y-auto p-6 md:p-12 space-y-10 scroll-smooth custom-scrollbar relative bg-slate-950 transition-opacity duration-500 ${isChatHidden ? 'opacity-0' : 'opacity-100'}`}>
+                <main ref={scrollRef} className="flex-1 overflow-y-auto space-y-6 sm:space-y-10 scroll-smooth custom-scrollbar relative bg-slate-950">
                     {/* Visual Flourish Background */}
                     <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,_rgba(59,130,246,0.03)_0%,_transparent_50%)] pointer-events-none"></div>
 
-                    {messages.length === 0 && (
-                        <div className="flex flex-col items-center justify-center h-full text-center space-y-8 animate-in fade-in duration-1000">
-                            <div className="relative">
-                                <div className="absolute inset-0 bg-primary/20 blur-[120px] rounded-full animate-pulse"></div>
-                                <div className="relative p-10 bg-slate-900/40 border border-white/10 rounded-[3rem] shadow-3xl ring-1 ring-white/5">
-                                    <SparklesIcon className="size-16 text-primary animate-[spin_4s_linear_infinite]" />
+                    {/* Immersive Neural Core Overlay (Voice Mode) */}
+                    {isChatHidden && (
+                        <div className="sticky top-0 h-full w-full z-10 flex flex-col items-center justify-center pointer-events-none p-4 overflow-hidden animate-in fade-in duration-700">
+                            <div className="relative scale-75 sm:scale-100">
+                                {/* Layers of glowing rings */}
+                                <div className={`absolute inset-0 bg-primary/20 blur-[100px] rounded-full transition-all duration-1000 ${voiceState === 'speaking' ? 'scale-150 opacity-100' : 'scale-100 opacity-40'}`}></div>
+                                <div className={`absolute -inset-10 border-2 border-primary/10 rounded-full animate-[spin_12s_linear_infinite] ${voiceState === 'speaking' ? 'opacity-30' : 'opacity-10'}`}></div>
+                                <div className={`absolute -inset-20 border border-white/5 rounded-full animate-[spin_20s_linear_infinite_reverse] ${voiceState === 'speaking' ? 'opacity-20' : 'opacity-5'}`}></div>
+
+                                {/* The Central Core */}
+                                <div className={`relative size-32 sm:size-48 rounded-full border-2 border-white/20 bg-slate-900/80 backdrop-blur-3xl shadow-[0_0_80px_rgba(59,130,246,0.3)] flex items-center justify-center transition-all duration-500
+                                    ${voiceState === 'listening' ? 'ring-8 ring-primary/20 animate-pulse scale-105' : ''}
+                                    ${voiceState === 'speaking' ? 'border-primary/50 shadow-[0_0_120px_rgba(59,130,246,0.6)] scale-110' : ''}
+                                `}>
+                                    <div className={`size-16 sm:size-24 rounded-full bg-gradient-to-br from-primary via-indigo-500 to-cyan-400 shadow-inner flex items-center justify-center relative overflow-hidden transition-transform duration-500 ${voiceState === 'speaking' ? 'scale-110' : 'scale-100'}`}>
+                                        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20"></div>
+                                        <ZapIcon className={`size-8 sm:size-12 text-white drop-shadow-lg transition-all duration-500 ${voiceState === 'speaking' ? 'animate-pulse scale-125' : ''}`} />
+                                    </div>
+
+                                    {/* Waveform Visualization Overlay (Simplified) */}
+                                    {voiceState === 'speaking' && (
+                                        <div className="absolute inset-0 rounded-full flex items-center justify-center gap-1">
+                                            {[...Array(8)].map((_, i) => (
+                                                <div key={i} className="w-1 bg-white/40 rounded-full animate-[equalizer_0.5s_ease_infinite]" style={{ height: '40%', animationDelay: `${i * 0.05}s` }}></div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
-                            <div className="max-w-md space-y-3">
-                                <h2 className="text-2xl font-black text-white tracking-widest uppercase">Neural Core Online</h2>
-                                <p className="text-slate-500 font-medium italic leading-relaxed text-sm">"Session synchronized. Standing by for vocal or textual instructions."</p>
+
+                            <div className="mt-12 sm:mt-20 text-center space-y-2 sm:space-y-4 animate-in fade-in slide-in-from-bottom-8 duration-1000">
+                                <p className="text-primary text-[10px] sm:text-xs font-black uppercase tracking-[0.4em] drop-shadow-md">
+                                    {voiceState === 'listening' ? 'Receptor Active' : voiceState === 'speaking' ? 'Synthesizing Neural Output' : 'Aerosonix Link Active'}
+                                </p>
+                                <h3 className="text-white/80 text-sm sm:text-lg font-bold italic max-w-xs px-4">
+                                    {voiceState === 'listening' ? "Awaiting vocal command..." : voiceState === 'speaking' ? "Delivering response..." : "Visual interface decoupled."}
+                                </h3>
                             </div>
                         </div>
                     )}
 
-                    {messages.map((m, i) => (
-                        <div key={i} className={`chat ${m.role === "user" ? "chat-end" : "chat-start"} animate-in fade-in slide-in-from-bottom-6 duration-700`}>
-                            <div className="chat-image avatar">
-                                <div className={`w-10 rounded-2xl p-2.5 shadow-2xl ring-1 ring-white/10 transition-transform hover:scale-110 ${m.role === 'user' ? 'bg-indigo-600' : 'bg-slate-800'}`}>
-                                    {m.role === "user" ? <CircleIcon className="size-full text-white" /> : <BotIcon className="size-full text-primary" />}
-                                </div>
-                            </div>
-                            <div className="chat-header opacity-30 text-[9px] font-black uppercase mb-1.5 tracking-[0.2em] px-1">
-                                {m.role === "user" ? "Integrator" : "System Response"}
-                                <time className="ml-2 opacity-50">{m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""}</time>
-                            </div>
-                            <div className={`chat-bubble text-sm md:text-[15px] font-medium leading-relaxed border-0 shadow-2xl py-5 px-7 mb-2 transition-all group
-                                ${m.role === "user" ? "bg-indigo-600 text-white rounded-3xl rounded-tr-none" : m.isError ? "bg-rose-950/40 text-rose-400 border-rose-900/50 italic" : "bg-slate-900/80 backdrop-blur-xl text-slate-100 rounded-3xl rounded-tl-none border border-white/5"}
-                            `}>
-                                {m.role === 'assistant' && !m.isError ? (
-                                    <div className="prose prose-sm prose-invert max-w-none prose-p:leading-relaxed prose-code:text-primary prose-pre:bg-black/60 prose-pre:rounded-2xl">
-                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
+                    {/* Message List Container (Fades in Voice Mode) */}
+                    <div className={`p-4 sm:p-6 md:p-12 space-y-6 sm:space-y-10 transition-all duration-700 ${isChatHidden ? 'opacity-0 scale-95 h-0 overflow-hidden' : 'opacity-100 scale-100'}`}>
+                        {messages.length === 0 && !isChatHidden && (
+                            <div className="flex flex-col items-center justify-center py-20 text-center space-y-8 animate-in fade-in duration-1000 p-4">
+                                <div className="relative">
+                                    <div className="absolute inset-0 bg-primary/20 blur-[120px] rounded-full animate-pulse"></div>
+                                    <div className="relative p-6 sm:p-10 bg-slate-900/40 border border-white/10 rounded-[2.5rem] sm:rounded-[3rem] shadow-3xl ring-1 ring-white/5">
+                                        <SparklesIcon className="size-10 sm:size-16 text-primary animate-[spin_4s_linear_infinite]" />
                                     </div>
-                                ) : (
-                                    <span className="whitespace-pre-wrap">{m.text}</span>
-                                )}
-                            </div>
-                        </div>
-                    ))}
-                    {isTyping && (
-                        <div className="chat chat-start animate-pulse">
-                            <div className="chat-bubble bg-slate-900/50 border border-primary/20 backdrop-blur-lg flex items-center gap-4 py-4 px-6 rounded-3xl rounded-tl-none">
-                                <div className="flex gap-1.5 items-center">
-                                    <span className="size-1.5 bg-primary rounded-full animate-bounce" />
-                                    <span className="size-1.5 bg-primary rounded-full animate-bounce [animation-delay:-0.15s]" />
-                                    <span className="size-1.5 bg-primary rounded-full animate-bounce [animation-delay:-0.3s]" />
                                 </div>
-                                <span className="text-[10px] text-primary/60 font-black uppercase tracking-widest font-mono italic">Synchronizing...</span>
-                            </div>
-                        </div>
-                    )}
-                </main>
-
-                {/* Fixed Non-Scrollable Footer */}
-                <footer className="p-6 md:p-10 bg-slate-950 border-t border-white/5 shrink-0 z-20">
-                    <div className="max-w-4xl mx-auto space-y-6">
-                        {translatedPreview && (
-                            <div className="alert bg-primary/10 border-primary/20 rounded-2xl py-3 animate-in slide-in-from-bottom-4 duration-500 shadow-lg">
-                                <div className="flex flex-col items-start gap-1 w-full">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <ZapIcon className="size-3 text-primary animate-pulse" />
-                                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-primary/80">Active Translation</span>
-                                    </div>
-                                    <p className="text-sm text-slate-300 font-bold italic">"{translatedPreview}"</p>
+                                <div className="max-w-md space-y-3">
+                                    <h2 className="text-xl sm:text-2xl font-black text-white tracking-widest uppercase">Neural Core Online</h2>
+                                    <p className="text-slate-500 font-medium italic leading-relaxed text-xs sm:text-sm">"Session synchronized. Standing by for instructions."</p>
                                 </div>
                             </div>
                         )}
 
-                        <div className="flex items-center gap-6">
-                            <div className="relative">
+                        {messages.map((m, i) => (
+                            <div key={i} className={`chat ${m.role === "user" ? "chat-end" : "chat-start"} animate-in fade-in slide-in-from-bottom-6 duration-700`}>
+                                <div className="chat-image avatar">
+                                    <div className={`w-10 rounded-2xl p-2.5 shadow-2xl ring-1 ring-white/10 transition-transform hover:scale-110 ${m.role === 'user' ? 'bg-indigo-600' : 'bg-slate-800'}`}>
+                                        {m.role === "user" ? <CircleIcon className="size-full text-white" /> : <BotIcon className="size-full text-primary" />}
+                                    </div>
+                                </div>
+                                <div className="chat-header opacity-30 text-[9px] font-black uppercase mb-1.5 tracking-[0.2em] px-1">
+                                    {m.role === "user" ? "Integrator" : "System Response"}
+                                    <time className="ml-2 opacity-50">{m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""}</time>
+                                </div>
+                                <div className={`chat-bubble text-xs sm:text-sm md:text-[15px] font-medium leading-relaxed border-0 shadow-2xl py-4 sm:py-5 px-5 sm:px-7 mb-2 transition-all group max-w-[85vw]
+                                ${m.role === "user" ? "bg-indigo-600 text-white rounded-2xl rounded-tr-none" : m.isError ? "bg-rose-950/40 text-rose-400 border-rose-900/50 italic" : "bg-slate-900/80 backdrop-blur-xl text-slate-100 rounded-2xl rounded-tl-none border border-white/5"}
+                            `}>
+                                    {m.role === 'assistant' && !m.isError ? (
+                                        <div className="prose prose-sm prose-invert max-w-none prose-p:leading-relaxed prose-code:text-primary prose-pre:bg-black/60 prose-pre:rounded-2xl">
+                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
+                                        </div>
+                                    ) : (
+                                        <span className="whitespace-pre-wrap">{m.text}</span>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                        {isTyping && (
+                            <div className="chat chat-start animate-pulse">
+                                <div className="chat-bubble bg-slate-900/50 border border-primary/20 backdrop-blur-lg flex items-center gap-4 py-4 px-6 rounded-3xl rounded-tl-none">
+                                    <div className="flex gap-1.5 items-center">
+                                        <span className="size-1.5 bg-primary rounded-full animate-bounce" />
+                                        <span className="size-1.5 bg-primary rounded-full animate-bounce [animation-delay:-0.15s]" />
+                                        <span className="size-1.5 bg-primary rounded-full animate-bounce [animation-delay:-0.3s]" />
+                                    </div>
+                                    <span className="text-[10px] text-primary/60 font-black uppercase tracking-widest font-mono italic">Synchronizing...</span>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </main>
+
+                {/* Fixed Non-Scrollable Footer */}
+                <footer className="p-4 sm:p-6 md:p-10 bg-slate-950 border-t border-white/5 shrink-0 z-20">
+                    <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6">
+                        {translatedPreview && (
+                            <div className="alert bg-primary/10 border-primary/20 rounded-xl sm:rounded-2xl py-2 sm:py-3 animate-in slide-in-from-bottom-4 duration-500 shadow-lg">
+                                <div className="flex flex-col items-start gap-1 w-full">
+                                    <div className="flex items-center gap-2 mb-0.5 sm:mb-1">
+                                        <ZapIcon className="size-3 text-primary animate-pulse" />
+                                        <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-primary/80">Active Translation</span>
+                                    </div>
+                                    <p className="text-xs sm:text-sm text-slate-300 font-bold italic truncate w-full">"{translatedPreview}"</p>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex items-center gap-3 sm:gap-6">
+                            <div className="relative shrink-0">
                                 {voiceState === "listening" && (
-                                    <div className="absolute inset-0 bg-primary/40 rounded-full blur-3xl animate-[ping_2s_infinite]"></div>
+                                    <div className="absolute inset-0 bg-primary/40 rounded-full blur-2xl animate-[ping_2s_infinite]"></div>
                                 )}
                                 <button
                                     onClick={handleMicClick}
-                                    className={`btn btn-circle btn-lg size-16 md:size-20 transition-all duration-700 relative z-10 border-none shadow-2xl
-                                        ${voiceState === "idle" ? "bg-slate-900 text-white/20 hover:bg-primary/20 hover:text-primary hover:scale-110" : ""}
-                                        ${voiceState === "listening" ? "bg-primary text-white scale-125 hover:rotate-6" : ""}
+                                    className={`btn btn-circle relative z-10 size-12 sm:size-16 md:size-20 transition-all duration-700 border-none shadow-2xl
+                                        ${voiceState === "idle" ? "bg-slate-900 text-white/20 hover:bg-primary/20 hover:text-primary hover:scale-105" : ""}
+                                        ${voiceState === "listening" ? "bg-primary text-white scale-110" : ""}
                                         ${voiceState === "processing" ? "bg-slate-800 text-primary rotate-180" : ""}
-                                        ${voiceState === "speaking" ? "bg-cyan-500 text-white shadow-[0_0_50px_rgba(6,182,212,0.4)]" : ""}
+                                        ${voiceState === "speaking" ? "bg-cyan-500 text-white shadow-[0_0_30px_rgba(6,182,212,0.4)]" : ""}
                                         ${voiceState === "error" ? "bg-rose-600 text-white" : ""}
                                     `}
                                 >
-                                    {voiceState === "idle" && <MicIcon className="size-8 transition-transform group-hover:scale-125" />}
-                                    {voiceState === "listening" && <CircleIcon className="size-10 fill-current animate-pulse ring-8 ring-white/10 rounded-full" />}
-                                    {voiceState === "processing" && <Loader2Icon className="size-10 animate-spin" />}
+                                    {voiceState === "idle" && <MicIcon className="size-6 sm:size-8" />}
+                                    {voiceState === "listening" && <CircleIcon className="size-7 sm:size-10 fill-current animate-pulse ring-4 sm:ring-8 ring-white/10 rounded-full" />}
+                                    {voiceState === "processing" && <Loader2Icon className="size-7 sm:size-10 animate-spin" />}
                                     {voiceState === "speaking" && (
-                                        <div className="flex items-center gap-1.5 h-10">
-                                            {[...Array(5)].map((_, i) => (
-                                                <div key={i} className={`w-1 bg-white rounded-full animate-[equalizer_0.7s_ease_infinite]`} style={{ animationDelay: `${i * 0.1}s`, height: '50%' }} />
+                                        <div className="flex items-center gap-1 h-6 sm:h-10">
+                                            {[...Array(3)].map((_, i) => (
+                                                <div key={i} className={`w-0.5 sm:w-1 bg-white rounded-full animate-[equalizer_0.7s_ease_infinite]`} style={{ animationDelay: `${i * 0.15}s`, height: '50%' }} />
                                             ))}
                                         </div>
                                     )}
-                                    {voiceState === "error" && <AlertCircleIcon className="size-10" />}
+                                    {voiceState === "error" && <AlertCircleIcon className="size-7 sm:size-10" />}
                                 </button>
                             </div>
 
-                            <div className="flex-1 flex bg-slate-900/80 border border-white/5 p-1 rounded-full shadow-2xl focus-within:ring-2 ring-primary/30 transition-all">
+                            <div className="flex-1 flex bg-slate-900/80 border border-white/5 p-1 rounded-full shadow-2xl focus-within:ring-2 ring-primary/30 transition-all overflow-hidden">
                                 <input
                                     type="text"
                                     value={inputText}
                                     onChange={(e) => setInputText(e.target.value)}
                                     onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                                    placeholder={voiceState === 'listening' ? "Link established. Speak..." : "Input command sequence..."}
-                                    className="input bg-transparent border-none outline-none focus:outline-none flex-1 text-white placeholder:text-slate-600 px-8 font-bold text-sm tracking-wide"
+                                    placeholder={voiceState === 'listening' ? "Listening..." : "Message..."}
+                                    className="input bg-transparent border-none outline-none focus:outline-none flex-1 text-white placeholder:text-slate-600 px-4 sm:px-8 font-bold text-xs sm:text-sm tracking-wide min-w-0"
                                 />
-                                <div className="flex items-center gap-3 pr-4 border-l border-white/10 ml-4">
+                                <div className="flex items-center gap-1.5 sm:gap-3 pr-1 sm:pr-4 border-l border-white/10 ml-1 sm:ml-4 shrink-0">
                                     <div className="dropdown dropdown-top dropdown-end">
-                                        <label tabIndex={0} className="btn btn-ghost btn-xs text-[9px] font-black tracking-widest text-slate-500 hover:text-primary p-0 h-auto uppercase">
-                                            {transLang ? transLang.label : "Native"}
+                                        <label tabIndex={0} className="btn btn-ghost btn-xs text-[8px] sm:text-[9px] font-black tracking-widest text-slate-500 hover:text-primary p-0 h-auto uppercase">
+                                            {transLang ? transLang.label.slice(0, 3) : "Nat"}
                                         </label>
-                                        <ul tabIndex={0} className="dropdown-content z-30 menu p-3 shadow-2xl bg-slate-900 border border-white/10 rounded-2xl w-44 mb-4">
-                                            <li><button onClick={() => setTransLang(null)} className="text-[10px] font-black py-4 uppercase">Direct Link</button></li>
+                                        <ul tabIndex={0} className="dropdown-content z-30 menu p-2 shadow-2xl bg-slate-900 border border-white/10 rounded-xl w-36 sm:w-44 mb-4">
+                                            <li><button onClick={() => setTransLang(null)} className="text-[9px] font-black py-3 uppercase">Direct</button></li>
                                             <div className="divider my-0 opacity-10"></div>
-                                            {TRANSLATION_LANGUAGES.slice(0, 8).map((l) => (
-                                                <li key={l.code}><button onClick={() => setTransLang(l)} className="text-[10px] font-black py-4 uppercase">{l.label}</button></li>
+                                            {TRANSLATION_LANGUAGES.slice(0, 10).map((l) => (
+                                                <li key={l.code}><button onClick={() => setTransLang(l)} className="text-[9px] font-black py-3 uppercase truncate">{l.label}</button></li>
                                             ))}
                                         </ul>
                                     </div>
-                                    <button onClick={() => handleSend()} disabled={!inputText.trim() || isTyping} className="btn btn-primary btn-circle size-11 shadow-lg ring-4 ring-primary/20 hover:scale-110 transition-transform">
-                                        {isTyping ? <Loader2Icon className="size-5 animate-spin" /> : <SendIcon className="size-5" />}
+                                    <button onClick={() => handleSend()} disabled={!inputText.trim() || isTyping} className="btn btn-primary btn-circle size-9 sm:size-11 shadow-lg ring-2 sm:ring-4 ring-primary/20 hover:scale-105 transition-transform shrink-0">
+                                        {isTyping ? <Loader2Icon className="size-4 sm:size-5 animate-spin" /> : <SendIcon className="size-4 sm:size-5" />}
                                     </button>
                                 </div>
                             </div>
@@ -764,6 +808,11 @@ const AiRobotShell = () => {
                 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
                 .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(59, 130, 246, 0.1); border-radius: 20px; border: 1px solid rgba(255,255,255,0.05); }
                 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(59, 130, 246, 0.3); }
+                
+                @keyframes pulse-slow {
+                    0%, 100% { transform: scale(1); opacity: 0.4; }
+                    50% { transform: scale(1.05); opacity: 0.6; }
+                }
             `}</style>
         </div>
     );
