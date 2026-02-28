@@ -234,6 +234,7 @@ export async function translate(req, res) {
 }
 
 export async function tts(req, res) {
+  const logPrefix = `[AEROSONIX-AI][SARVAM-TTS][${new Date().toISOString()}]`;
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
@@ -241,24 +242,36 @@ export async function tts(req, res) {
     const { text, languageCode, speaker } = req.body || {};
     const apiKey = (process.env.SARVAM_API_KEY || "").trim();
 
-    const sarvamRes = await axios.post("https://api.sarvam.ai/text-to-speech", {
-      inputs: [text],
-      target_language_code: languageCode || "en-IN",
-      model: "bulbul:v3",
-      speaker: speaker || "shubh"
-    }, {
-      headers: { "api-subscription-key": apiKey }
+    console.log(`${logPrefix} Initiating Streaming TTS: Speaker="${speaker || 'shubh'}", Length=${text?.length}`);
+
+    const sarvamRes = await axios({
+      method: "post",
+      url: "https://api.sarvam.ai/text-to-speech/stream",
+      data: {
+        text: text,
+        target_language_code: languageCode || "en-IN",
+        speaker: speaker || "shubh",
+        model: "bulbul:v3",
+        pace: 1.1,
+        speech_sample_rate: 22050,
+        output_audio_codec: "mp3",
+        enable_preprocessing: true
+      },
+      headers: {
+        "api-subscription-key": apiKey,
+        "Content-Type": "application/json"
+      },
+      responseType: "stream"
     });
 
-    if (sarvamRes.data?.audios?.[0]) {
-      const buffer = Buffer.from(sarvamRes.data.audios[0], 'base64');
-      res.setHeader("Content-Type", "audio/mpeg");
-      return res.status(200).send(buffer);
-    }
-    return res.status(500).json({ message: "TTS failed" });
+    res.setHeader("Content-Type", "audio/mpeg");
+    sarvamRes.data.pipe(res);
+
   } catch (error) {
-    console.error("TTS Error:", error.response?.data || error.message);
-    return res.status(500).json({ message: "Internal Server Error" });
+    console.error(`${logPrefix} Streaming TTS Error:`, error.response?.data || error.message);
+    if (!res.headersSent) {
+      return res.status(500).json({ message: "Internal Server Error during TTS streaming." });
+    }
   }
 }
 

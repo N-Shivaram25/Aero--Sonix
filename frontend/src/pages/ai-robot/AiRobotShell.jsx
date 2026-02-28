@@ -276,17 +276,70 @@ const AiRobotShell = () => {
     const handleTts = async (text) => {
         try {
             setVoiceState("speaking");
-            const audioBuffer = await aiRobotTts({
-                text,
-                languageCode: voiceLang.code,
-                speaker: selectedVoice?.voiceId || "shubh"
+            const token = localStorage.getItem("aerosonix_token");
+            const apiUrl = `${import.meta.env.VITE_API_URL}/ai-robot/tts`;
+
+            const response = await fetch(apiUrl, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    text: text,
+                    languageCode: voiceLang.code,
+                    speaker: selectedVoice?.voiceId || "shubh"
+                })
             });
-            const blob = new Blob([audioBuffer], { type: "audio/mpeg" });
-            const url = URL.createObjectURL(blob);
-            audioPlayerRef.current.src = url;
-            audioPlayerRef.current.play();
-            audioPlayerRef.current.onended = () => setVoiceState("idle");
+
+            if (!response.ok) throw new Error("TTS Stream Request Failed");
+
+            // REAL-TIME STREAMING PLAYBACK
+            if ("MediaSource" in window && MediaSource.isTypeSupported("audio/mpeg")) {
+                const mediaSource = new MediaSource();
+                const url = URL.createObjectURL(mediaSource);
+                audioPlayerRef.current.src = url;
+
+                mediaSource.addEventListener("sourceopen", async () => {
+                    const sourceBuffer = mediaSource.addSourceBuffer("audio/mpeg");
+                    const reader = response.body.getReader();
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) {
+                            if (mediaSource.readyState === "open") mediaSource.endOfStream();
+                            break;
+                        }
+
+                        await new Promise(resolve => {
+                            if (sourceBuffer.updating) {
+                                sourceBuffer.addEventListener("updateend", resolve, { once: true });
+                            } else resolve();
+                        });
+
+                        sourceBuffer.appendBuffer(value);
+                    }
+                });
+
+                audioPlayerRef.current.play();
+                audioPlayerRef.current.onended = () => setVoiceState("idle");
+            } else {
+                // FALLBACK: BLOB Collect
+                const chunks = [];
+                const reader = response.body.getReader();
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                }
+                const blob = new Blob(chunks, { type: "audio/mpeg" });
+                audioPlayerRef.current.src = URL.createObjectURL(blob);
+                audioPlayerRef.current.play();
+                audioPlayerRef.current.onended = () => setVoiceState("idle");
+            }
+
         } catch (err) {
+            console.error("TTS Streaming Error:", err);
             setVoiceState("idle");
         }
     };
