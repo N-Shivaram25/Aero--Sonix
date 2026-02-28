@@ -11,7 +11,6 @@ import {
 import {
   getHistory,
   getVoices,
-  renameVoice,
   sendMessage,
   stt,
   translate,
@@ -26,7 +25,6 @@ router.use(protectRoute);
 
 router.get("/voices", getVoices);
 router.post("/voices/upload", upload.array("audioFiles", 10), uploadVoice);
-router.put("/voices/:voiceId", renameVoice);
 
 router.get("/history", getHistory);
 router.post("/message", sendMessage);
