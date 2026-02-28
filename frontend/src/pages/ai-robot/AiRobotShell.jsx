@@ -378,7 +378,7 @@ const AiRobotShell = () => {
                                 <span className="size-1.5 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
                                 <span className="size-1.5 bg-blue-500 rounded-full animate-bounce" />
                             </div>
-                            <span className="text-xs text-blue-400/70 font-semibold uppercase tracking-widest font-mono">Synthesizing...</span>
+                            <span className="text-xs text-blue-400/70 font-semibold uppercase tracking-widest font-mono">Jarvis is Thinking (DeepSeek)...</span>
                         </div>
                     </div>
                 )}

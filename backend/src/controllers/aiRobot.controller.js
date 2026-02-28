@@ -5,9 +5,9 @@ import axios from "axios";
 
 const DEFAULT_MODULE = "general";
 
-// OpenRouter model IDs - Free models
-const PRIMARY_MODEL = "google/gemma-3-4b-it:free";
-const FALLBACK_MODEL = "google/gemma-2-9b-it:free";
+// NVIDIA DeepSeek Configuration
+const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
+const NVIDIA_MODEL = "deepseek-ai/deepseek-v3.2";
 
 const normalizeModule = (value) => {
   const v = String(value || "").trim().toLowerCase();
@@ -90,7 +90,7 @@ export async function getHistory(req, res) {
 }
 
 export async function sendMessage(req, res) {
-  const logPrefix = `[AI-ASSISTANT][SEND_MESSAGE][${new Date().toISOString()}]`;
+  const logPrefix = `[AI-ASSISTANT][NVIDIA-DEEPSEEK][${new Date().toISOString()}]`;
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
@@ -112,86 +112,81 @@ export async function sendMessage(req, res) {
       content: m.text,
     }));
 
-    // Securely pull and trim API Key
-    const apiKeyRaw = process.env.OPEN_ROUTER_API_KEY || "";
-    const apiKey = apiKeyRaw.trim();
-
+    const apiKey = (process.env.DEEPSEEK_V3_2 || "").trim();
     if (!apiKey) {
-      console.error(`${logPrefix} Missing OPEN_ROUTER_API_KEY in environment`);
+      console.error(`${logPrefix} Missing DEEPSEEK_V3_2 in environment`);
       return res.status(500).json({
-        message: "AI service configuration missing on server",
-        error: "MISSING_API_KEY"
+        message: "AI service configuration missing on server (DeepSeek Key)",
+        error: "MISSING_DEEPSEEK_KEY"
       });
     }
 
-    const tryModel = async (modelId) => {
-      console.log(`${logPrefix} Attempting request to model: ${modelId}`);
-      return axios.post("https://openrouter.ai/api/v1/chat/completions", {
-        model: modelId,
+    // Call NVIDIA API for DeepSeek-V3.2
+    try {
+      console.log(`${logPrefix} Calling NVIDIA DeepSeek...`);
+      const response = await axios.post(`${NVIDIA_BASE_URL}/chat/completions`, {
+        model: NVIDIA_MODEL,
         messages: [
           { role: "system", content: systemPrompt },
           ...trimmedContext,
           { role: "user", content: message },
         ],
-        stream: false
+        temperature: 0.6,
+        top_p: 0.95,
+        max_tokens: 4096,
+        chat_template_kwargs: { thinking: true }
       }, {
         headers: {
           "Authorization": `Bearer ${apiKey}`,
           "Content-Type": "application/json",
-          "HTTP-Referer": "https://aero-sonix.onrender.com",
-          "X-Title": "AeroSonix"
         },
-        timeout: 45000 // Increased to 45s for free models
+        timeout: 60000
       });
-    };
 
-    let response;
-    try {
-      response = await tryModel(PRIMARY_MODEL);
-    } catch (primaryErr) {
-      console.warn(`${logPrefix} Primary model (${PRIMARY_MODEL}) failed: ${primaryErr.response?.data?.error?.message || primaryErr.message}`);
-      console.log(`${logPrefix} Attempting fallback to ${FALLBACK_MODEL}...`);
-      try {
-        response = await tryModel(FALLBACK_MODEL);
-      } catch (fallbackErr) {
-        console.error(`${logPrefix} Fallback model (${FALLBACK_MODEL}) also failed: ${fallbackErr.response?.data?.error?.message || fallbackErr.message}`);
+      let reply = response.data?.choices?.[0]?.message?.content?.trim() || "";
 
-        const errorDetails = fallbackErr.response?.data || fallbackErr.message;
-        return res.status(fallbackErr.response?.status || 502).json({
-          message: "AI service is currently busy or unavailable. Please try again in a few moments.",
-          details: errorDetails
-        });
+      // Handle reasoning content (thinking)
+      const reasoning = response.data?.choices?.[0]?.message?.reasoning_content;
+      if (reasoning) {
+        console.log(`${logPrefix} DeepSeek Thinking: ${reasoning.substring(0, 50)}...`);
       }
-    }
 
-    const reply = response.data?.choices?.[0]?.message?.content?.trim() || "";
-    if (!reply) {
-      throw new Error("Empty response received from OpenRouter");
-    }
+      if (!reply) {
+        console.error(`${logPrefix} No content in AI response:`, JSON.stringify(response.data));
+        throw new Error("Empty reply from AI service");
+      }
 
-    console.log(`${logPrefix} AI Reply generated successfully (${reply.length} chars)`);
+      console.log(`${logPrefix} AI Reply generated successfully using DeepSeek`);
 
-    await AiRobotHistory.findOneAndUpdate(
-      { userId, module },
-      {
-        $push: {
-          messages: {
-            $each: [
-              { role: "user", text: message },
-              { role: "assistant", text: reply },
-            ],
+      await AiRobotHistory.findOneAndUpdate(
+        { userId, module },
+        {
+          $push: {
+            messages: {
+              $each: [
+                { role: "user", text: message },
+                { role: "assistant", text: reply },
+              ],
+            },
           },
         },
-      },
-      { upsert: true, new: true }
-    );
+        { upsert: true, new: true }
+      );
 
-    return res.status(200).json({ success: true, module, reply });
+      return res.status(200).json({ success: true, module, reply });
+
+    } catch (apiErr) {
+      console.error(`${logPrefix} NVIDIA API Error:`, apiErr.response?.data || apiErr.message);
+      return res.status(apiErr.response?.status || 502).json({
+        message: "The AI service (NVIDIA DeepSeek) rejected the request or is offline.",
+        details: apiErr.response?.data || apiErr.message
+      });
+    }
 
   } catch (error) {
-    console.error(`${logPrefix} Unhandled Exception:`, error);
+    console.error(`${logPrefix} Unhandled Error in sendMessage:`, error);
     return res.status(500).json({
-      message: "An unexpected error occurred in the AI handler.",
+      message: "An internal server error occurred while processing the AI response.",
       details: error.message
     });
   }
@@ -209,12 +204,7 @@ export async function stt(req, res) {
     const languageCode = String(req.body?.languageCode || "en-IN").trim();
     const apiKey = (process.env.SARVAM_API_KEY || "").trim();
 
-    if (!apiKey) {
-      console.error(`${logPrefix} Missing SARVAM_API_KEY`);
-      return res.status(500).json({ message: "Speech service key missing" });
-    }
-
-    console.log(`${logPrefix} Processing audio for user ${userId}, langCode: ${languageCode}`);
+    if (!apiKey) return res.status(500).json({ message: "Speech service key missing" });
 
     const formData = new FormData();
     const blob = new Blob([file.buffer], { type: file.mimetype || "audio/wav" });
@@ -227,15 +217,10 @@ export async function stt(req, res) {
     });
 
     const text = String(sarvamRes.data?.transcript || "").trim();
-    console.log(`${logPrefix} Transcript Result: "${text}"`);
-
     return res.status(200).json({ success: true, text });
   } catch (error) {
     console.error(`${logPrefix} Error:`, error.response?.data || error.message);
-    return res.status(500).json({
-      message: "Could not transcribe audio. Please try speaking again.",
-      details: error.response?.data || error.message
-    });
+    return res.status(500).json({ message: "Transcription failed" });
   }
 }
 
@@ -249,8 +234,6 @@ export async function translate(req, res) {
     if (!text) return res.status(400).json({ message: "text is required" });
 
     const apiKey = (process.env.SARVAM_API_KEY || "").trim();
-
-    console.log(`${logPrefix} Translating text to ${targetLanguageCode}`);
 
     const sarvamRes = await axios.post("https://api.sarvam.ai/translate", {
       input: text,
@@ -282,8 +265,6 @@ export async function tts(req, res) {
 
     const apiKey = (process.env.SARVAM_API_KEY || "").trim();
 
-    console.log(`${logPrefix} Generating speech for text length: ${text.length}`);
-
     const sarvamRes = await axios.post("https://api.sarvam.ai/text-to-speech", {
       inputs: [text],
       target_language_code: languageCode || "en-IN",
@@ -301,12 +282,10 @@ export async function tts(req, res) {
       res.setHeader("Content-Type", "audio/mpeg");
       return res.status(200).send(buffer);
     }
-
-    console.error(`${logPrefix} No audio returned in responses`);
-    return res.status(500).json({ message: "TTS audio generation failed" });
+    return res.status(500).json({ message: "TTS failed" });
   } catch (error) {
     console.error(`${logPrefix} Error:`, error.response?.data || error.message);
-    return res.status(500).json({ message: "Internal Server Error in TTS" });
+    return res.status(500).json({ message: "Internal Server Error" });
   }
 }
 
