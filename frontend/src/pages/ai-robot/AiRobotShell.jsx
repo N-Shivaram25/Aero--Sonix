@@ -349,8 +349,22 @@ const AiRobotShell = () => {
             };
 
         } catch (err) {
-            console.error(`${logPrefix} TTS Failure:`, err.message || err);
-            // Some error data might be in JSON even if blob was expected
+            let actualMsg = err.message || "Unknown voice error";
+
+            // Handle Axios errors where responseType was 'arraybuffer'
+            if (err.response?.data instanceof ArrayBuffer) {
+                try {
+                    const decoded = JSON.parse(new TextDecoder().decode(err.response.data));
+                    actualMsg = decoded.message || decoded.error?.message || actualMsg;
+                } catch (e) {
+                    // Not JSON, ignore
+                }
+            } else if (err.response?.data?.message) {
+                actualMsg = err.response.data.message;
+            }
+
+            console.error(`${logPrefix} CRITICAL FAILURE:`, actualMsg, err);
+            toast.error(`Voice Assistant: ${actualMsg}`);
             setVoiceState("idle");
         }
     };
