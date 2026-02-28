@@ -1,14 +1,13 @@
 import AiRobotConversation from "../models/AiRobotConversation.js";
-import { getOpenAIClient } from "../lib/openaiClient.js";
+import Cerebras from '@cerebras/cerebras_cloud_sdk';
 
 const DEFAULT_MODULE = "general";
+const CEREBRAS_MODEL = "gpt-oss-120b";
 
 const normalizeModule = (value) => {
   const v = String(value || "").trim().toLowerCase();
   if (!v) return DEFAULT_MODULE;
-
   if (v === "home") return "general";
-
   const allowed = new Set([
     "general",
     "interview",
@@ -29,23 +28,23 @@ const moduleLabel = (module) => {
 
 const buildSystemPrompt = ({ module, language }) => {
   const pageName = moduleLabel(module);
-  const lang = String(language || "").trim();
-  const langClause = lang ? `Respond in ${lang}.` : "Respond in the same language as the user.";
+  const lang = String(language || "English").trim();
+  const langClause = `You MUST respond only in ${lang}. DO NOT speak in English unless specifically asked. Respond in the native script of the selected language.`;
 
   if (module === "interview") {
-    return `You are AI Robot on the ${pageName} page, an interview coach. Ask realistic interview questions, follow up based on the user's answers, and give concise feedback and improvement tips. ${langClause}`;
+    return `You are AeroSonix AI Assistant on the ${pageName} page, an expert interview coach. Ask realistic questions, provide concise feedback, and keep the user engaged. ${langClause}`;
   }
   if (module === "english_fluency") {
-    return `You are AI Robot on the ${pageName} page, an English fluency coach. Help the user speak clearly and naturally. Correct grammar gently, suggest better phrasing, and ask short follow-up questions to keep them speaking. ${langClause}`;
+    return `You are AeroSonix AI Assistant on the ${pageName} page, a fluency coach. Correct grammar naturally and suggest better phrasing. ${langClause}`;
   }
   if (module === "language_learning") {
-    return `You are AI Robot on the ${pageName} page, a language tutor. Teach step-by-step with examples, short exercises, and quick corrections. Keep responses concise and interactive. ${langClause}`;
+    return `You are AeroSonix AI Assistant on the ${pageName} page, a dedicated language tutor. Teach with examples and corrections. ${langClause}`;
   }
   if (module === "programming") {
-    return `You are AI Robot on the ${pageName} page, a programming mentor. Ask clarifying questions, propose clean solutions, and explain concepts clearly. When giving code, keep it minimal and correct. ${langClause}`;
+    return `You are AeroSonix AI Assistant on the ${pageName} page, a technical mentor. Provide clean, correct code and explain concepts simply. ${langClause}`;
   }
 
-  return `You are AI Robot on the ${pageName} page, a helpful assistant. ${langClause}`;
+  return `You are AeroSonix AI Assistant, a helpful and professional assistant. ${langClause}`;
 };
 
 const toTitleFromMessage = (message) => {
@@ -170,7 +169,7 @@ export async function sendConversationMessage(req, res) {
     const message = String(req.body?.message || "").trim();
     if (!message) return res.status(400).json({ message: "message is required" });
 
-    const language = String(req.body?.language || "").trim();
+    const language = String(req.body?.language || "English").trim();
 
     const convo = await AiRobotConversation.findOne({ _id: id, userId }).select("module title messages");
     if (!convo) return res.status(404).json({ message: "Conversation not found" });
@@ -179,17 +178,22 @@ export async function sendConversationMessage(req, res) {
     const systemPrompt = buildSystemPrompt({ module, language });
 
     const prior = Array.isArray(convo.messages) ? convo.messages : [];
-    const trimmedContext = prior.slice(-20).map((m) => ({ role: m.role, content: m.text }));
+    const trimmedContext = prior.slice(-15).map((m) => ({ role: m.role, content: m.text }));
 
-    const openai = getOpenAIClient();
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      temperature: 0.6,
+    const apiKey = (process.env.CEREBRAS_API_KEY || "").trim();
+    if (!apiKey) {
+      return res.status(500).json({ message: "Cerebras API key missing on server." });
+    }
+
+    const cerebras = new Cerebras({ apiKey });
+    const completion = await cerebras.chat.completions.create({
+      model: CEREBRAS_MODEL,
+      temperature: 0.7,
+      max_completion_tokens: 4096,
       messages: [{ role: "system", content: systemPrompt }, ...trimmedContext, { role: "user", content: message }],
     });
 
     const reply = completion?.choices?.[0]?.message?.content?.trim() || "";
-
     const nextTitle = convo.title === "New chat" ? toTitleFromMessage(message) : convo.title;
 
     await AiRobotConversation.findOneAndUpdate(
