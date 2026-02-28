@@ -63,9 +63,9 @@ FORMATTING RULES:
 export async function getVoices(req, res) {
   const speakers = [
     { voiceId: "shubh", voiceName: "Shubh (Male)", isDefault: true },
-    { voiceId: "aditya", voiceName: "Aditya (Male)", isDefault: true },
-    { voiceId: "ritu", voiceName: "Ritu (Female)", isDefault: true },
-    { voiceId: "priya", voiceName: "Priya (Female)", isDefault: true },
+    { voiceId: "ritu", voiceName: "Ritu (Female)", isDefault: false },
+    { voiceId: "amit", voiceName: "Amit (Male)", isDefault: false },
+    { voiceId: "sumit", voiceName: "Sumit (Male)", isDefault: false },
   ];
   return res.status(200).json({ success: true, voices: speakers });
 }

@@ -32,7 +32,8 @@ import {
     createAiRobotConversation,
     getAiRobotConversation,
     deleteAiRobotConversation,
-    aiRobotSendConversationMessage
+    aiRobotSendConversationMessage,
+    getAiRobotVoices
 } from "../../lib/api";
 import useAuthUser from "../../hooks/useAuthUser";
 
@@ -61,6 +62,8 @@ const AiRobotShell = () => {
     const [inputText, setInputText] = useState("");
     const [translatedPreview, setTranslatedPreview] = useState("");
     const [isTyping, setIsTyping] = useState(false);
+    const [voices, setVoices] = useState([]);
+    const [selectedVoice, setSelectedVoice] = useState(null);
     const [voiceLang, setVoiceLang] = useState(VOICE_LANGUAGES[0]);
     const [transLang, setTransLang] = useState(null);
 
@@ -81,11 +84,23 @@ const AiRobotShell = () => {
     const module = location.pathname.split("/").pop() || "general";
 
     useEffect(() => {
+        fetchVoices();
         fetchConversations();
         return () => {
             cleanupVoice();
         };
     }, [module]);
+
+    const fetchVoices = async () => {
+        try {
+            const res = await getAiRobotVoices();
+            if (res.success) {
+                setVoices(res.voices);
+                const def = res.voices.find(v => v.isDefault) || res.voices[0];
+                setSelectedVoice(def);
+            }
+        } catch (err) { }
+    };
 
     useEffect(() => {
         scrollToBottom();
@@ -264,7 +279,7 @@ const AiRobotShell = () => {
             const audioBuffer = await aiRobotTts({
                 text,
                 languageCode: voiceLang.code,
-                speaker: voiceLang.label.match(/hindi|telugu|tamil|kannada/i) ? "ritu" : "shubh"
+                speaker: selectedVoice?.voiceId || "shubh"
             });
             const blob = new Blob([audioBuffer], { type: "audio/mpeg" });
             const url = URL.createObjectURL(blob);
@@ -412,6 +427,26 @@ const AiRobotShell = () => {
                         >
                             <PlusIcon className="size-3" /> New Session
                         </button>
+
+                        {/* Voice Dropdown */}
+                        <div className="dropdown dropdown-end">
+                            <label tabIndex={0} className="btn btn-ghost btn-sm border border-white/10 flex items-center gap-2 text-xs font-bold bg-white/5">
+                                <MicIcon className="size-3 text-primary" /> {selectedVoice?.voiceName || "Voice"} <ChevronDownIcon className="size-3" />
+                            </label>
+                            <ul tabIndex={0} className="dropdown-content z-[30] menu p-2 shadow-2xl bg-slate-900 border border-white/10 rounded-xl w-48 mt-4">
+                                {voices.map((v) => (
+                                    <li key={v.voiceId}>
+                                        <button
+                                            onClick={() => setSelectedVoice(v)}
+                                            className={`flex items-center justify-between font-bold py-3 ${selectedVoice?.voiceId === v.voiceId ? "bg-primary text-white" : "hover:bg-white/5"}`}
+                                        >
+                                            {v.voiceName}
+                                            {selectedVoice?.voiceId === v.voiceId && <CheckIcon className="size-3.5" />}
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
 
                         <div className="dropdown dropdown-end">
                             <label tabIndex={0} className="btn btn-ghost btn-sm border border-white/10 flex items-center gap-2 text-xs font-bold bg-white/5">
