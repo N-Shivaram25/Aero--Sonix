@@ -293,35 +293,63 @@ export async function tts(req, res) {
       return res.status(400).json({ success: false, message: "No text provided for TTS." });
     }
 
-    const payload = {
-      text,
-      target_language_code: languageCode || "en-IN",
-      model: "bulbul:v3",
-      speaker: speaker || "shubh",
-      pace: 1.1,
-      speech_sample_rate: 22050,
-      enable_preprocessing: true
-    };
+    // CHUNKING LOGIC: Sarvam has a 2500 limit. We use 2000 for safety.
+    const MAX_LENGTH = 2000;
+    const chunks = [];
+    let remainingText = text;
 
-    console.log(`${logPrefix} Sending TTS Request:`, JSON.stringify(payload));
+    while (remainingText.length > 0) {
+      if (remainingText.length <= MAX_LENGTH) {
+        chunks.push(remainingText);
+        break;
+      }
+      // Look for last period, newline or space within the MAX_LENGTH boundary
+      let splitIdx = remainingText.lastIndexOf(". ", MAX_LENGTH);
+      if (splitIdx === -1) splitIdx = remainingText.lastIndexOf("\n", MAX_LENGTH);
+      if (splitIdx === -1) splitIdx = remainingText.lastIndexOf(" ", MAX_LENGTH);
+      if (splitIdx === -1) splitIdx = MAX_LENGTH;
 
-    const sarvamRes = await axios.post("https://api.sarvam.ai/text-to-speech", payload, {
-      headers: {
-        "api-subscription-key": apiKey,
-        "Content-Type": "application/json"
-      },
-      timeout: 8000
-    });
-
-    if (sarvamRes.data?.audios?.[0]) {
-      console.log(`${logPrefix} Success: Received binary audio data.`);
-      const buffer = Buffer.from(sarvamRes.data.audios[0], 'base64');
-      res.setHeader("Content-Type", "audio/mpeg");
-      return res.status(200).send(buffer);
-    } else {
-      console.error(`${logPrefix} Error: Sarvam returned empty audio.`, JSON.stringify(sarvamRes.data));
-      return res.status(500).json({ success: false, message: "Empty audio response from Sarvam AI." });
+      chunks.push(remainingText.substring(0, splitIdx + 1).trim());
+      remainingText = remainingText.substring(splitIdx + 1).trim();
     }
+
+    console.log(`${logPrefix} Processing ${chunks.length} chunks for long-form text (Total: ${text.length} chars)`);
+
+    const audioBuffers = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+      console.log(`${logPrefix} Processing Chunk ${i + 1}/${chunks.length} (${chunks[i].length} chars)`);
+
+      const payload = {
+        text: chunks[i],
+        target_language_code: languageCode || "en-IN",
+        model: "bulbul:v3",
+        speaker: speaker || "shubh",
+        pace: 1.1,
+        speech_sample_rate: 22050,
+        enable_preprocessing: true
+      };
+
+      const sarvamRes = await axios.post("https://api.sarvam.ai/text-to-speech", payload, {
+        headers: {
+          "api-subscription-key": apiKey,
+          "Content-Type": "application/json"
+        },
+        timeout: 15000
+      });
+
+      if (sarvamRes.data?.audios?.[0]) {
+        audioBuffers.push(Buffer.from(sarvamRes.data.audios[0], 'base64'));
+      } else {
+        console.error(`${logPrefix} Chunk ${i + 1} failed: Empty audio response.`);
+        throw new Error(`Empty audio response for chunk ${i + 1}`);
+      }
+    }
+
+    const buffer = Buffer.concat(audioBuffers);
+    console.log(`${logPrefix} Success: Combined ${chunks.length} chunks into a single ${buffer.length} byte stream.`);
+    res.setHeader("Content-Type", "audio/mpeg");
+    return res.status(200).send(buffer);
 
   } catch (error) {
     const status = error.response?.status || 500;
