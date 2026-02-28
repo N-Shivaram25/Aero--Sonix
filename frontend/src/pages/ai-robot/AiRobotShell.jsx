@@ -9,7 +9,8 @@ import {
     Volume2Icon,
     AlertCircleIcon,
     CircleIcon,
-    CheckIcon
+    CheckIcon,
+    Loader2Icon
 } from "lucide-react";
 import toast from "react-hot-toast";
 import {
@@ -113,7 +114,9 @@ const AiRobotShell = () => {
             recorderRef.current.stop();
         }
         if (recognitionRef.current) {
-            recognitionRef.current.stop();
+            try {
+                recognitionRef.current.stop();
+            } catch (err) { }
         }
         if (streamRef.current) {
             streamRef.current.getTracks().forEach((track) => track.stop());
@@ -148,10 +151,14 @@ const AiRobotShell = () => {
                 const aiMsg = { role: "assistant", text: res.reply, timestamp: new Date() };
                 setMessages((prev) => [...prev, aiMsg]);
                 handleTts(res.reply);
+            } else {
+                throw new Error(res.message || "Failed to generate AI response.");
             }
         } catch (err) {
+            const errMsg = err.response?.data?.message || err.message || "AI service error.";
             console.error("Chat error:", err);
-            toast.error("AI service is currently busy. Please try again.");
+            toast.error(`Jarvis: "${errMsg}"`, { duration: 5000 });
+            setMessages((prev) => [...prev, { role: "assistant", text: `⚠️ ERROR: ${errMsg}`, timestamp: new Date(), isError: true }]);
         } finally {
             setIsTyping(false);
         }
@@ -185,7 +192,6 @@ const AiRobotShell = () => {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             streamRef.current = stream;
 
-            // Initialize MediaRecorder for Sarika (High Quality)
             const mediaRecorder = new MediaRecorder(stream);
             recorderRef.current = mediaRecorder;
             const chunks = [];
@@ -203,15 +209,16 @@ const AiRobotShell = () => {
                         handleSend(res.text);
                     } else {
                         setVoiceState("idle");
+                        toast.error("Couldn't hear you clearly.", { duration: 2000 });
                     }
                 } catch (err) {
                     setVoiceState("error");
                     setLastError("Transcription failed");
-                    setTimeout(() => setVoiceState("idle"), 3000);
+                    toast.error("Speech service error.");
+                    setTimeout(() => setVoiceState("idle"), 2000);
                 }
             };
 
-            // Initialize Web Speech API for Real-time Typing
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (SpeechRecognition) {
                 const recognition = new SpeechRecognition();
@@ -221,48 +228,32 @@ const AiRobotShell = () => {
                 recognition.continuous = true;
 
                 recognition.onresult = (event) => {
-                    let interimTranscript = "";
+                    let currentTranscript = "";
                     for (let i = event.resultIndex; i < event.results.length; ++i) {
-                        if (event.results[i].isFinal) {
-                            // Final chunk detected
-                        } else {
-                            interimTranscript += event.results[i][0].transcript;
-                        }
+                        currentTranscript += event.results[i][0].transcript;
                     }
-                    const finalOrInterim = Array.from(event.results)
-                        .map(res => res[0].transcript)
-                        .join(' ');
+                    setInputText(currentTranscript);
 
-                    setInputText(finalOrInterim);
-
-                    // Reset 2-second silence timer
                     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
                     silenceTimerRef.current = setTimeout(() => {
-                        console.log("2 seconds silence detected, stopping...");
+                        console.log("2 seconds silence detected, stopping voice interaction...");
                         if (mediaRecorder.state === "recording") {
                             mediaRecorder.stop();
-                            recognition.stop();
+                            try { recognition.stop(); } catch (e) { }
                         }
                     }, 2000);
                 };
 
-                recognition.onerror = (e) => console.error("Recognition error:", e);
+                recognition.onerror = (e) => console.error("SpeechRecognition error:", e);
                 recognition.start();
             }
 
             mediaRecorder.start();
 
-            // Fallback: Max 15 seconds if no silence detected
-            setTimeout(() => {
-                if (mediaRecorder.state === "recording") {
-                    mediaRecorder.stop();
-                    if (recognitionRef.current) recognitionRef.current.stop();
-                }
-            }, 15000);
-
         } catch (err) {
             setVoiceState("error");
             setLastError("Microphone access denied");
+            toast.error("Microphone access is required for voice chatting.");
             setTimeout(() => setVoiceState("idle"), 3000);
         }
     };
@@ -279,13 +270,13 @@ const AiRobotShell = () => {
     return (
         <div className="flex flex-col h-full bg-gradient-to-br from-[#0f172a] to-[#020617] text-slate-100 overflow-hidden font-sans">
             {/* Header */}
-            <header className="flex items-center justify-between p-4 bg-white/5 backdrop-blur-md border-b border-white/10 z-10">
+            <header className="flex items-center justify-between p-4 bg-white/5 backdrop-blur-md border-b border-white/10 z-10 shadow-2xl shadow-blue-500/5">
                 <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-500/20 rounded-xl border border-blue-500/30">
-                        <BotIcon className="size-6 text-blue-400" />
+                    <div className="p-2 bg-blue-500/20 rounded-xl border border-blue-500/30 group">
+                        <BotIcon className="size-6 text-blue-400 group-hover:scale-110 transition-transform duration-300" />
                     </div>
                     <div>
-                        <h1 className="text-xl font-bold tracking-tight text-white">AI - Assistance</h1>
+                        <h1 className="text-xl font-bold tracking-tight text-white/90">AI - Assistance</h1>
                         <div className="flex items-center gap-1.5 mt-0.5">
                             <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
                             <span className="text-[10px] font-medium text-emerald-400/80 uppercase tracking-widest">System Ready</span>
@@ -295,18 +286,18 @@ const AiRobotShell = () => {
 
                 <div className="flex items-center gap-4">
                     <div className="flex flex-col items-end">
-                        <label className="text-[10px] text-slate-400 uppercase tracking-widest mb-1">Voice Language</label>
+                        <label className="text-[10px] text-slate-500 uppercase tracking-widest mb-1 font-bold">Voice Language</label>
                         <div className="dropdown dropdown-end">
-                            <div tabIndex={0} role="button" className="flex items-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-all text-sm">
+                            <div tabIndex={0} role="button" className="flex items-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-all text-sm group">
                                 {voiceLang.label}
-                                <ChevronDownIcon className="size-3.5 opacity-50" />
+                                <ChevronDownIcon className="size-3.5 opacity-50 group-hover:translate-y-0.5 transition-transform" />
                             </div>
-                            <ul tabIndex={0} className="dropdown-content z-[20] menu p-2 shadow-2xl bg-[#1e293b] border border-white/10 rounded-xl w-48 mt-2 max-h-64 overflow-y-auto">
+                            <ul tabIndex={0} className="dropdown-content z-[30] menu p-2 shadow-2xl bg-[#0f172a] border border-white/10 rounded-xl w-48 mt-2 max-h-64 overflow-y-auto backdrop-blur-xl">
                                 {VOICE_LANGUAGES.map((l) => (
                                     <li key={l.code}>
                                         <button
                                             onClick={() => setVoiceLang(l)}
-                                            className={`flex items-center justify-between ${voiceLang.code === l.code ? "bg-blue-500/20 text-blue-400" : ""}`}
+                                            className={`flex items-center justify-between ${voiceLang.code === l.code ? "bg-blue-500/20 text-blue-400" : "hover:bg-white/5"}`}
                                         >
                                             {l.label}
                                             {voiceLang.code === l.code && <CheckIcon className="size-3.5" />}
@@ -319,10 +310,10 @@ const AiRobotShell = () => {
 
                     <button
                         onClick={() => { setMessages([]); toast.success("Chat cleared"); }}
-                        className="p-2.5 bg-white/5 hover:bg-red-500/10 border border-white/10 rounded-xl transition-all group"
+                        className="p-2.5 bg-white/5 hover:bg-red-500/10 border border-white/10 rounded-xl transition-all group shadow-inner"
                         title="Clear Chat"
                     >
-                        <RefreshCcwIcon className="size-5 text-slate-400 group-hover:text-red-400 transition-colors" />
+                        <RefreshCcwIcon className="size-5 text-slate-500 group-hover:text-red-400 transition-colors group-active:rotate-180 duration-500" />
                     </button>
                 </div>
             </header>
@@ -330,15 +321,15 @@ const AiRobotShell = () => {
             {/* Chat Area */}
             <main
                 ref={scrollRef}
-                className="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth"
+                className="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth custom-scrollbar"
             >
                 {messages.length === 0 && (
-                    <div className="flex flex-col items-center justify-center h-full opacity-40">
-                        <div className="p-6 bg-white/5 rounded-full mb-4 border border-white/5">
-                            <BotIcon className="size-16 text-blue-400/50" />
+                    <div className="flex flex-col items-center justify-center h-full opacity-40 animate-pulse">
+                        <div className="p-8 bg-white/5 rounded-full mb-6 border border-white/5 shadow-2xl shadow-blue-500/10">
+                            <BotIcon className="size-20 text-blue-400/50" />
                         </div>
-                        <p className="text-lg font-medium">Jarvis at your service.</p>
-                        <p className="text-sm">Initiate interaction via text or voice.</p>
+                        <p className="text-xl font-medium tracking-tight">Jarvis at your service.</p>
+                        <p className="text-sm mt-2 font-light">Initiate interaction via text or digital voice matching.</p>
                     </div>
                 )}
 
@@ -347,28 +338,30 @@ const AiRobotShell = () => {
                         key={i}
                         className={`flex ${m.role === "user" ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-2 duration-300`}
                     >
-                        <div className={`flex gap-3 max-w-[85%] ${m.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
+                        <div className={`flex gap-3 max-w-[90%] md:max-w-[80%] ${m.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
                             {m.role === "assistant" && (
-                                <div className="size-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0 mt-1">
-                                    <BotIcon className="size-4 text-blue-400" />
+                                <div className={`size-8 rounded-lg ${m.isError ? "bg-red-500/10 border-red-500/20" : "bg-blue-500/10 border-blue-500/20"} border flex items-center justify-center shrink-0 mt-1 shadow-inner`}>
+                                    {m.isError ? <AlertCircleIcon className="size-4 text-red-500" /> : <BotIcon className="size-4 text-blue-400" />}
                                 </div>
                             )}
                             <div className="flex flex-col">
                                 <div
-                                    className={`px-4 py-3 rounded-2xl border text-sm leading-relaxed shadow-lg
+                                    className={`px-4 py-3 rounded-2xl border text-[13px] md:text-sm leading-relaxed shadow-lg backdrop-blur-sm
                     ${m.role === "user"
-                                            ? "bg-gradient-to-br from-blue-600 to-indigo-700 border-blue-400/30 text-white rounded-tr-none"
-                                            : "bg-white/5 backdrop-blur-md border-white/10 text-slate-200 rounded-tl-none"}
+                                            ? "bg-gradient-to-br from-blue-600 to-indigo-700 border-blue-400/30 text-white rounded-tr-none shadow-blue-500/20"
+                                            : m.isError
+                                                ? "bg-red-500/5 border-red-500/20 text-red-300 rounded-tl-none italic"
+                                                : "bg-white/5 border-white/10 text-slate-200 rounded-tl-none"}
                   `}
                                 >
                                     {m.text}
                                 </div>
-                                <div className={`flex items-center gap-1.5 mt-1.5 px-1 ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                                    <span className="text-[10px] uppercase font-bold tracking-tighter text-slate-500">
-                                        {m.role === "user" ? "ME" : "JARVIS"}
+                                <div className={`flex items-center gap-1.5 mt-2 px-1 ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                                    <span className={`text-[9px] uppercase font-black tracking-widest ${m.role === "user" ? "text-indigo-400" : "text-blue-500"}`}>
+                                        {m.role === "user" ? "SYSTEM_USER" : "ASSISTANT_AI"}
                                     </span>
-                                    <span className="size-1 rounded-full bg-slate-700" />
-                                    <span className="text-[10px] text-slate-500">
+                                    <span className="size-1 rounded-full bg-slate-800" />
+                                    <span className="text-[10px] text-slate-600 font-mono">
                                         {m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""}
                                     </span>
                                 </div>
@@ -379,56 +372,60 @@ const AiRobotShell = () => {
 
                 {isTyping && (
                     <div className="flex justify-start animate-in fade-in duration-200">
-                        <div className="flex items-center gap-2 px-4 py-3 bg-white/5 border border-white/10 rounded-2xl rounded-tl-none">
-                            <div className="flex gap-1">
-                                <span className="size-1.5 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                                <span className="size-1.5 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                                <span className="size-1.5 bg-blue-400 rounded-full animate-bounce" />
+                        <div className="flex items-center gap-3 px-4 py-3 bg-white/5 border border-white/10 rounded-2xl rounded-tl-none ring-1 ring-blue-500/10">
+                            <div className="flex gap-1.5">
+                                <span className="size-1.5 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                                <span className="size-1.5 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                                <span className="size-1.5 bg-blue-500 rounded-full animate-bounce" />
                             </div>
-                            <span className="text-xs text-blue-400/70 font-medium">Jarvis is thinking...</span>
+                            <span className="text-xs text-blue-400/70 font-semibold uppercase tracking-widest font-mono">Synthesizing...</span>
                         </div>
                     </div>
                 )}
             </main>
 
             {/* Bottom Interface */}
-            <footer className="p-6 bg-white/5 backdrop-blur-xl border-t border-white/10 space-y-4">
+            <footer className="p-6 bg-[#020617]/80 backdrop-blur-2xl border-t border-white/10 space-y-4">
                 {translatedPreview && (
-                    <div className="px-4 py-2 bg-blue-500/10 border border-blue-500/20 rounded-xl animate-in slide-in-from-bottom-1 duration-200">
-                        <p className="text-[10px] uppercase tracking-widest text-blue-400 font-bold mb-1">Translation Preview ({transLang.label})</p>
-                        <p className="text-sm text-slate-300 italic">"{translatedPreview}"</p>
+                    <div className="px-5 py-3 bg-blue-500/5 border border-blue-500/20 rounded-2xl animate-in slide-in-from-bottom-2 duration-300 ring-1 ring-blue-500/5 shadow-inner">
+                        <div className="flex items-center justify-between mb-1.5">
+                            <p className="text-[9px] uppercase tracking-widest text-blue-500 font-black">Dynamic Language Conversion ({transLang.label})</p>
+                            <Loader2Icon className="size-3 text-blue-500/50 animate-spin" />
+                        </div>
+                        <p className="text-sm text-slate-200 font-medium leading-relaxed italic">"{translatedPreview}"</p>
                     </div>
                 )}
 
-                <div className="flex items-center gap-4">
-                    <div className="relative group shrink-0">
+                <div className="flex items-center gap-5">
+                    {/* JARVIS Mic Button */}
+                    <div className="relative group shrink-0 scale-110">
                         <button
                             onClick={handleMicClick}
-                            className={`relative z-10 size-14 rounded-full flex items-center justify-center transition-all duration-300 shadow-2xl
-                ${voiceState === "idle" ? "bg-slate-800 text-blue-400 hover:scale-105 border border-white/10 shadow-blue-500/5" : ""}
-                ${voiceState === "listening" ? "bg-red-500 text-white shadow-red-500/20" : ""}
-                ${voiceState === "processing" ? "bg-amber-500 text-white" : ""}
-                ${voiceState === "speaking" ? "bg-blue-500 text-white shadow-blue-500/40" : ""}
-                ${voiceState === "error" ? "bg-rose-600 text-white" : ""}
+                            className={`relative z-10 size-16 rounded-full flex items-center justify-center transition-all duration-500 shadow-2xl border-2
+                ${voiceState === "idle" ? "bg-[#0f172a] text-blue-400 border-white/5 hover:border-blue-500/50 hover:shadow-blue-500/20" : ""}
+                ${voiceState === "listening" ? "bg-red-500 text-white border-red-400/50 ring-4 ring-red-500/20" : ""}
+                ${voiceState === "processing" ? "bg-amber-500 text-white border-white/20" : ""}
+                ${voiceState === "speaking" ? "bg-blue-600 text-white border-white/20 ring-4 ring-blue-500/20 shadow-blue-500/40" : ""}
+                ${voiceState === "error" ? "bg-rose-700 text-white border-white/10" : ""}
               `}
                         >
-                            {voiceState === "idle" && <MicIcon className="size-6" />}
-                            {voiceState === "listening" && <CircleIcon className="size-6 fill-current animate-ping" />}
-                            {voiceState === "processing" && <RefreshCcwIcon className="size-6 animate-spin" />}
+                            {voiceState === "idle" && <MicIcon className="size-7" />}
+                            {voiceState === "listening" && <CircleIcon className="size-7 fill-current animate-pulse" />}
+                            {voiceState === "processing" && <RefreshCcwIcon className="size-7 animate-spin" />}
                             {voiceState === "speaking" && (
-                                <div className="flex items-end gap-0.5 h-6">
-                                    <div className="w-1 bg-white animate-[equalizer_0.8s_ease_infinite] h-2" />
-                                    <div className="w-1 bg-white animate-[equalizer_0.6s_ease_infinite] h-4" />
-                                    <div className="w-1 bg-white animate-[equalizer_0.9s_ease_infinite] h-full" />
-                                    <div className="w-1 bg-white animate-[equalizer_0.7s_ease_infinite] h-3" />
+                                <div className="flex items-end gap-1 h-7">
+                                    <div className="w-1.5 bg-white animate-[equalizer_0.7s_ease_infinite] h-2 rounded-full" />
+                                    <div className="w-1.5 bg-white animate-[equalizer_0.5s_ease_infinite] h-5 rounded-full" />
+                                    <div className="w-1.5 bg-white animate-[equalizer_0.8s_ease_infinite] h-full rounded-full" />
+                                    <div className="w-1.5 bg-white animate-[equalizer_0.6s_ease_infinite] h-4 rounded-full" />
                                 </div>
                             )}
-                            {voiceState === "error" && <AlertCircleIcon className="size-6" />}
+                            {voiceState === "error" && <AlertCircleIcon className="size-7" />}
                         </button>
 
-                        <div className="absolute -top-10 left-1/2 -translate-x-1/2 whitespace-nowrap">
-                            <span className={`px-2 py-1 bg-[#1e293b] text-[10px] border border-white/10 rounded-md uppercase tracking-wider font-bold transition-opacity ${voiceState === 'idle' ? 'opacity-0' : 'opacity-100'}`}>
-                                {voiceState === 'listening' ? 'Listening...' : voiceState === 'processing' ? 'Analysing...' : voiceState === 'speaking' ? 'Speaking...' : voiceState}
+                        <div className="absolute -top-12 left-1/2 -translate-x-1/2">
+                            <span className={`px-2.5 py-1 bg-[#1e293b] text-[9px] border border-white/10 rounded-lg uppercase tracking-widest font-black transition-all duration-300 shadow-2xl ${voiceState === 'idle' ? 'opacity-0 translate-y-2' : 'opacity-100 translate-y-0'}`}>
+                                {voiceState === 'listening' ? 'Listening' : voiceState === 'processing' ? 'Analysing' : voiceState === 'speaking' ? 'Assistant Speaking' : voiceState}
                             </span>
                         </div>
 
@@ -439,36 +436,37 @@ const AiRobotShell = () => {
                             </>
                         )}
                         {voiceState === "speaking" && (
-                            <div className="absolute -inset-2 bg-blue-500/30 blur-xl rounded-full animate-pulse" />
+                            <div className="absolute -inset-4 bg-blue-500/20 blur-2xl rounded-full animate-pulse z-0" />
                         )}
                     </div>
 
-                    <div className="flex-1 flex items-center bg-white/5 border border-white/10 rounded-2xl px-4 py-2 transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_20px_rgba(59,130,246,0.1)]">
+                    <div className="flex-1 flex items-center bg-white/5 border border-white/10 rounded-3xl px-5 py-2.5 transition-all focus-within:border-blue-500/40 focus-within:bg-white/[0.07] focus-within:shadow-[0_0_30px_rgba(59,130,246,0.08)]">
                         <input
                             type="text"
                             value={inputText}
                             onChange={(e) => setInputText(e.target.value)}
                             onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                            placeholder={voiceState === 'listening' ? "Speaking..." : "Type in English..."}
-                            className={`flex-1 bg-transparent border-none outline-none text-slate-200 placeholder:text-slate-500 py-3 ${voiceState === 'listening' ? 'animate-pulse text-blue-400' : ''}`}
+                            placeholder={voiceState === 'listening' ? "Voice active..." : "Digital uplink ready..."}
+                            className={`flex-1 bg-transparent border-none outline-none text-slate-100 placeholder:text-slate-600 py-3 text-sm font-medium ${voiceState === 'listening' ? 'animate-pulse text-blue-400 italic' : ''}`}
                         />
 
-                        <div className="flex items-center gap-2 pl-4 border-l border-white/10">
-                            <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold hidden sm:block">Convert To:</span>
+                        <div className="flex items-center gap-3 pl-5 border-l border-white/10 shrink-0">
+                            <span className="text-[10px] text-slate-600 uppercase tracking-widest font-black hidden sm:block">Translation</span>
                             <div className="dropdown dropdown-top dropdown-end">
-                                <div tabIndex={0} role="button" className="flex items-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg transition-all text-sm border border-white/5">
+                                <div tabIndex={0} role="button" className="flex items-center gap-2 px-3 py-2 bg-white/5 hover:bg-white/10 rounded-xl transition-all text-[11px] border border-white/10 group font-bold">
                                     {transLang ? transLang.label : "None"}
-                                    <ChevronDownIcon className="size-3" />
+                                    <ChevronDownIcon className="size-3 text-slate-500 group-hover:translate-y-0.5 transition-transform" />
                                 </div>
-                                <ul tabIndex={0} className="dropdown-content z-[20] menu p-2 shadow-2xl bg-[#1e293b] border border-white/10 rounded-xl w-40 mb-2 max-h-60 overflow-y-auto">
+                                <ul tabIndex={0} className="dropdown-content z-[30] menu p-2 shadow-2xl bg-[#0f172a] border border-white/10 rounded-2xl w-44 mb-3 max-h-60 overflow-y-auto backdrop-blur-2xl">
                                     <li>
-                                        <button onClick={() => setTransLang(null)} className={!transLang ? "bg-blue-500/20 text-blue-400" : ""}>
+                                        <button onClick={() => setTransLang(null)} className={`text-[11px] font-bold ${!transLang ? "bg-blue-500/20 text-blue-400" : "hover:bg-white/5"}`}>
                                             None
                                         </button>
                                     </li>
+                                    <div className="h-px bg-white/5 my-1" />
                                     {TRANSLATION_LANGUAGES.map((l) => (
                                         <li key={l.code}>
-                                            <button onClick={() => setTransLang(l)} className={transLang?.code === l.code ? "bg-blue-500/20 text-blue-400" : ""}>
+                                            <button onClick={() => setTransLang(l)} className={`text-[11px] font-bold ${transLang?.code === l.code ? "bg-blue-500/20 text-blue-400" : "hover:bg-white/5"}`}>
                                                 {l.label}
                                             </button>
                                         </li>
@@ -480,7 +478,7 @@ const AiRobotShell = () => {
                         <button
                             onClick={() => handleSend()}
                             disabled={!inputText.trim()}
-                            className="ml-4 p-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:hove:bg-blue-600 text-white rounded-xl transition-all shadow-lg shadow-blue-600/20"
+                            className="ml-5 p-3.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-20 disabled:grayscale text-white rounded-2xl transition-all shadow-xl shadow-blue-600/20 active:scale-95"
                         >
                             <SendIcon className="size-5" />
                         </button>
@@ -490,21 +488,21 @@ const AiRobotShell = () => {
 
             <style>{`
         @keyframes equalizer {
-          0%, 100% { height: 4px; }
+          0%, 100% { height: 6px; }
           50% { height: 100%; }
         }
-        ::-webkit-scrollbar {
+        .custom-scrollbar::-webkit-scrollbar {
           width: 5px;
         }
-        ::-webkit-scrollbar-track {
+        .custom-scrollbar::-webkit-scrollbar-track {
           background: transparent;
         }
-        ::-webkit-scrollbar-thumb {
-          background: rgba(255, 255, 255, 0.1);
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(59, 130, 246, 0.1);
           border-radius: 10px;
         }
-        ::-webkit-scrollbar-thumb:hover {
-          background: rgba(255, 255, 255, 0.2);
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(59, 130, 246, 0.2);
         }
       `}</style>
         </div>
