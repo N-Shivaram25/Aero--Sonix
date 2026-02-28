@@ -302,41 +302,55 @@ const AiRobotShell = () => {
     };
 
     const handleTts = async (text) => {
+        const logPrefix = "[AEROSONIX][TTS-DEBUG]";
         try {
+            if (!text) return;
+            console.log(`${logPrefix} Initiating TTS for: "${text.slice(0, 40)}..."`);
             setVoiceState("speaking");
-            const token = localStorage.getItem("aerosonix_token");
-            const apiUrl = `${import.meta.env.VITE_API_URL}/ai-robot/tts`;
 
-            const response = await fetch(apiUrl, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    text: text,
-                    languageCode: voiceLang.code,
-                    speaker: selectedVoice?.voiceId || "shubh"
-                })
+            // Use the integrated API helper instead of manual fetch to avoid "undefined" URL issues
+            const audioData = await aiRobotTts({
+                text,
+                languageCode: voiceLang.code,
+                speaker: selectedVoice?.voiceId || "shubh"
             });
 
-            if (!response.ok) {
-                const errData = await response.json().catch(() => ({}));
-                throw new Error(errData.message || "TTS Request Failed");
+            if (!audioData || audioData.byteLength < 100) {
+                console.error(`${logPrefix} Received invalid or empty audio buffer.`);
+                throw new Error("Empty audio response");
             }
 
-            const blob = await response.blob();
+            console.log(`${logPrefix} Audio byteLength: ${audioData.byteLength}`);
+
+            const blob = new Blob([audioData], { type: "audio/mpeg" });
             const url = URL.createObjectURL(blob);
 
             audioPlayerRef.current.src = url;
-            audioPlayerRef.current.play();
+
+            audioPlayerRef.current.onerror = (e) => {
+                console.error(`${logPrefix} HTML5 Audio Player Error:`, e);
+                toast.error("Audio playback error.");
+                setVoiceState("idle");
+            };
+
+            const playPromise = audioPlayerRef.current.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                    console.error(`${logPrefix} Autoplay blocked or failure:`, error);
+                    toast.error("Playback blocked. Please click anywhere to allow voice.");
+                    setVoiceState("idle");
+                });
+            }
+
             audioPlayerRef.current.onended = () => {
                 setVoiceState("idle");
                 URL.revokeObjectURL(url);
+                console.log(`${logPrefix} Playback finished.`);
             };
 
         } catch (err) {
-            console.error("TTS Playback Error:", err);
+            console.error(`${logPrefix} TTS Failure:`, err.message || err);
+            // Some error data might be in JSON even if blob was expected
             setVoiceState("idle");
         }
     };

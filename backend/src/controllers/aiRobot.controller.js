@@ -247,47 +247,61 @@ export async function tts(req, res) {
     const apiKey = (process.env.SARVAM_API_KEY || "").trim();
 
     if (!apiKey) {
-      console.error(`${logPrefix} Missing SARVAM_API_KEY`);
-      return res.status(500).json({ message: "Sarvam API configuration missing." });
+      console.error(`${logPrefix} !!! CRITICAL: SARVAM_API_KEY IS MISSING IN ENVIRONMENT !!!`);
+      return res.status(500).json({
+        success: false,
+        message: "Sarvam AI key is not set. Check Render ENV variables.",
+        error: "MISSING_KEY"
+      });
     }
 
-    console.log(`${logPrefix} Calling Sarvam Bulbul V3: Speaker="${speaker || 'shubh'}", Length=${text?.length}`);
+    if (!text) {
+      return res.status(400).json({ success: false, message: "No text provided for TTS." });
+    }
 
-    const sarvamRes = await axios.post("https://api.sarvam.ai/text-to-speech", {
-      text: text,
+    const payload = {
+      text,
       target_language_code: languageCode || "en-IN",
       model: "bulbul:v3",
       speaker: speaker || "shubh",
       pace: 1.1,
       speech_sample_rate: 22050,
       enable_preprocessing: true
-    }, {
+    };
+
+    console.log(`${logPrefix} Sending TTS Request:`, JSON.stringify(payload));
+
+    const sarvamRes = await axios.post("https://api.sarvam.ai/text-to-speech", payload, {
       headers: {
         "api-subscription-key": apiKey,
         "Content-Type": "application/json"
-      }
+      },
+      timeout: 8000
     });
 
-    if (sarvamRes.data?.audios && sarvamRes.data.audios.length > 0) {
-      // Decode the base64 response from Sarvam AI
-      const audioBase64 = sarvamRes.data.audios[0];
-      const audioBuffer = Buffer.from(audioBase64, 'base64');
-
+    if (sarvamRes.data?.audios?.[0]) {
+      console.log(`${logPrefix} Success: Received binary audio data.`);
+      const buffer = Buffer.from(sarvamRes.data.audios[0], 'base64');
       res.setHeader("Content-Type", "audio/mpeg");
-      return res.status(200).send(audioBuffer);
+      return res.status(200).send(buffer);
     } else {
-      console.error(`${logPrefix} Invalid response from Sarvam:`, sarvamRes.data);
-      return res.status(500).json({ message: "Failed to generate audio from AI service." });
+      console.error(`${logPrefix} Error: Sarvam returned empty audio.`, JSON.stringify(sarvamRes.data));
+      return res.status(500).json({ success: false, message: "Empty audio response from Sarvam AI." });
     }
 
   } catch (error) {
     const status = error.response?.status || 500;
-    const errData = error.response?.data?.error || {};
-    console.error(`${logPrefix} Sarvam API Error [${status}]:`, errData.message || error.message);
+    const errBody = error.response?.data || {};
+    const errorMsg = errBody.error?.message || errBody.message || error.message;
+
+    console.error(`${logPrefix} !!! SARVAM API ERROR [${status}] !!!`);
+    console.error(`${logPrefix} Full Error Response:`, JSON.stringify(errBody));
 
     return res.status(status).json({
-      message: errData.message || "AeroSonix Voice service is temporarily unavailable.",
-      code: errData.code
+      success: false,
+      message: `Sarvam AI Error: ${errorMsg}`,
+      details: errorMsg,
+      code: errBody.error?.code || "TTS_UNKNOWN"
     });
   }
 }
