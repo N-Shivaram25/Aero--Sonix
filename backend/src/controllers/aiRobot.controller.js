@@ -293,10 +293,22 @@ export async function tts(req, res) {
       return res.status(400).json({ success: false, message: "No text provided for TTS." });
     }
 
-    // CHUNKING LOGIC: Sarvam has a 2500 limit. We use 2000 for safety.
-    const MAX_LENGTH = 2000;
+    // CLEAN TEXT: Remove markdown symbols that often cause TTS models to fail or sound weird
+    const cleanText = text
+      .replace(/#{1,6}\s?/g, "") // Remove headers
+      .replace(/(\*\*|__)(.*?)\1/g, "$2") // Remove bold
+      .replace(/(\*|_)(.*?)\1/g, "$2") // Remove italics
+      .replace(/```[\s\S]*?```/g, " [Code Block] ") // Replace large code blocks with a label
+      .replace(/`([^`]+)`/g, "$1") // Remove inline code backticks
+      .replace(/\[([^\]]+)\]\([^\)]+\)/g, "$1") // Remove markdown links, keep text
+      .trim();
+
+    console.log(`${logPrefix} Cleaned text length: ${cleanText.length} (Original: ${text.length})`);
+
+    // CHUNKING LOGIC: Sarvam has a 2500 limit. We use 1800 for even more safety.
+    const MAX_LENGTH = 1800;
     const chunks = [];
-    let remainingText = text;
+    let remainingText = cleanText;
 
     while (remainingText.length > 0) {
       if (remainingText.length <= MAX_LENGTH) {
@@ -313,41 +325,42 @@ export async function tts(req, res) {
       remainingText = remainingText.substring(splitIdx + 1).trim();
     }
 
-    console.log(`${logPrefix} Processing ${chunks.length} chunks for long-form text (Total: ${text.length} chars)`);
+    console.log(`${logPrefix} Processing ${chunks.length} chunks...`);
 
     const audioBuffers = [];
 
     for (let i = 0; i < chunks.length; i++) {
-      console.log(`${logPrefix} Processing Chunk ${i + 1}/${chunks.length} (${chunks[i].length} chars)`);
+      try {
+        console.log(`${logPrefix} Chunk ${i + 1}/${chunks.length} (${chunks[i].length} chars)`);
 
-      const payload = {
-        text: chunks[i],
-        target_language_code: languageCode || "en-IN",
-        model: "bulbul:v3",
-        speaker: speaker || "shubh",
-        pace: 1.1,
-        speech_sample_rate: 22050,
-        enable_preprocessing: true
-      };
+        const sarvamRes = await axios.post("https://api.sarvam.ai/text-to-speech", {
+          text: chunks[i],
+          target_language_code: languageCode || "en-IN",
+          model: "bulbul:v3",
+          speaker: speaker || "shubh",
+          pace: 1.1,
+          speech_sample_rate: 22050,
+          enable_preprocessing: true
+        }, {
+          headers: { "api-subscription-key": apiKey, "Content-Type": "application/json" },
+          timeout: 20000
+        });
 
-      const sarvamRes = await axios.post("https://api.sarvam.ai/text-to-speech", payload, {
-        headers: {
-          "api-subscription-key": apiKey,
-          "Content-Type": "application/json"
-        },
-        timeout: 15000
-      });
-
-      if (sarvamRes.data?.audios?.[0]) {
-        audioBuffers.push(Buffer.from(sarvamRes.data.audios[0], 'base64'));
-      } else {
-        console.error(`${logPrefix} Chunk ${i + 1} failed: Empty audio response.`);
-        throw new Error(`Empty audio response for chunk ${i + 1}`);
+        if (sarvamRes.data?.audios?.[0]) {
+          audioBuffers.push(Buffer.from(sarvamRes.data.audios[0], 'base64'));
+        }
+      } catch (chunkErr) {
+        console.error(`${logPrefix} Chunk ${i + 1} FAILED but continuing:`, chunkErr.response?.data || chunkErr.message);
+        // Skip failing chunks to prevent complete silence
       }
     }
 
+    if (audioBuffers.length === 0) {
+      throw new Error("All TTS chunks failed to process.");
+    }
+
     const buffer = Buffer.concat(audioBuffers);
-    console.log(`${logPrefix} Success: Combined ${chunks.length} chunks into a single ${buffer.length} byte stream.`);
+    console.log(`${logPrefix} Success: Combined ${audioBuffers.length} valid chunks into ${buffer.length} bytes.`);
     res.setHeader("Content-Type", "audio/mpeg");
     return res.status(200).send(buffer);
 
