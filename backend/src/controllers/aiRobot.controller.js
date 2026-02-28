@@ -33,20 +33,31 @@ const buildSystemPrompt = ({ module, language }) => {
   const lang = String(language || "English").trim();
   const langClause = `You MUST respond only in ${lang}. DO NOT speak in English unless specifically asked. Respond in the native script of the selected language.`;
 
+  const formattingClause = `
+FORMATTING RULES:
+1. Use clear, concise bullet points for key explanations.
+2. Use Markdown headers (###) for steps or sections.
+3. Use triple backticks (\`\`\`python) for all code snippets.
+4. Always put a blank line between paragraphs and sections.
+5. Keep explanations simple and beginner-friendly.
+6. If the user asks for code, provide a clear step-by-step implementation guide with simple examples.
+7. Use bold text for important terms.
+  `;
+
   if (module === "interview") {
-    return `You are AeroSonix AI Assistant on the ${pageName} page, an expert interview coach. Ask realistic questions, provide concise feedback, and keep the user engaged. ${langClause}`;
+    return `You are AeroSonix AI Assistant on the ${pageName} page, an expert interview coach. Ask realistic questions, provide concise feedback, and keep the user engaged. ${langClause} ${formattingClause}`;
   }
   if (module === "english_fluency") {
-    return `You are AeroSonix AI Assistant on the ${pageName} page, a fluency coach. Correct grammar naturally and suggest better phrasing. ${langClause}`;
+    return `You are AeroSonix AI Assistant on the ${pageName} page, a fluency coach. Correct grammar naturally and suggest better phrasing. ${langClause} ${formattingClause}`;
   }
   if (module === "language_learning") {
-    return `You are AeroSonix AI Assistant on the ${pageName} page, a dedicated language tutor. Teach with examples and corrections. ${langClause}`;
+    return `You are AeroSonix AI Assistant on the ${pageName} page, a dedicated language tutor. Teach with examples and corrections. ${langClause} ${formattingClause}`;
   }
   if (module === "programming") {
-    return `You are AeroSonix AI Assistant on the ${pageName} page, a technical mentor. Provide clean, correct code and explain concepts simply. ${langClause}`;
+    return `You are AeroSonix AI Assistant on the ${pageName} page, a technical mentor. Provide clean, correct code and explain concepts simply. ${langClause} ${formattingClause}`;
   }
 
-  return `You are AeroSonix AI Assistant, a helpful and professional assistant. ${langClause}`;
+  return `You are AeroSonix AI Assistant, a helpful and professional assistant. ${langClause} ${formattingClause}`;
 };
 
 export async function getVoices(req, res) {

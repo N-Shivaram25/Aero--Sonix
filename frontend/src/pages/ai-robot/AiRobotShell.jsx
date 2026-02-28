@@ -14,6 +14,8 @@ import {
     ZapIcon,
     MicOffIcon
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import toast from "react-hot-toast";
 import {
     aiRobotSendMessage,
@@ -366,15 +368,28 @@ const AiRobotShell = () => {
                             </time>
                         </div>
                         <div
-                            className={`chat-bubble text-sm md:text-[15px] font-medium leading-relaxed border-0 shadow-xl py-4 px-6
+                            className={`chat-bubble text-sm md:text-[15px] font-medium leading-relaxed border-0 shadow-xl py-4 px-6 mb-2
                                 ${m.role === "user"
                                     ? "bg-indigo-600 text-white rounded-tr-none"
                                     : m.isError
-                                        ? "bg-rose-950/40 text-rose-400 border border-rose-900/50 italic"
+                                        ? "bg-rose-950/40 text-rose-400 border border-rose-900/50 italic whitespace-pre-wrap"
                                         : "bg-slate-800/80 backdrop-blur-md text-slate-100 rounded-tl-none border border-white/5"}
                         `}
                         >
-                            {m.text}
+                            {m.role === 'assistant' && !m.isError ? (
+                                <div className="prose prose-sm prose-invert max-w-none
+                                    prose-p:leading-relaxed prose-p:my-2
+                                    prose-headings:text-primary prose-headings:font-black prose-headings:tracking-tight prose-headings:mt-4 prose-headings:mb-2
+                                    prose-ul:my-3 prose-li:my-1 prose-ul:list-disc prose-ul:pl-5
+                                    prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1 prose-code:rounded prose-code:before:content-none prose-code:after:content-none
+                                    prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10 prose-pre:rounded-2xl prose-pre:my-4
+                                    prose-strong:text-white prose-strong:font-black
+                                ">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
+                                </div>
+                            ) : (
+                                <span className="whitespace-pre-wrap">{m.text}</span>
+                            )}
                         </div>
                     </div>
                 ))}
