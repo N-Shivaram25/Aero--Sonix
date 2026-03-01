@@ -23,7 +23,8 @@ import {
     Minimize2Icon,
     EyeIcon,
     EyeOffIcon,
-    ArrowLeftIcon
+    ArrowLeftIcon,
+    LanguagesIcon
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -729,13 +730,24 @@ const AiRobotShell = () => {
                 <footer className="p-4 sm:p-6 md:p-10 bg-slate-950 border-t border-white/5 shrink-0 z-20">
                     <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6">
                         {translatedPreview && (
-                            <div className="alert bg-primary/10 border-primary/20 rounded-xl sm:rounded-2xl py-2 sm:py-3 animate-in slide-in-from-bottom-4 duration-500 shadow-lg">
-                                <div className="flex flex-col items-start gap-1 w-full">
-                                    <div className="flex items-center gap-2 mb-0.5 sm:mb-1">
-                                        <ZapIcon className="size-3 text-primary animate-pulse" />
-                                        <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-primary/80">Active Translation</span>
+                            <div className="alert bg-indigo-500/10 border-indigo-500/20 rounded-2xl py-3 px-5 animate-in slide-in-from-bottom-4 duration-500 shadow-[0_8px_32px_rgba(99,102,241,0.1)] backdrop-blur-md">
+                                <div className="flex flex-col items-start gap-2 w-full">
+                                    <div className="flex items-center justify-between w-full">
+                                        <div className="flex items-center gap-2">
+                                            <div className="size-5 bg-indigo-500/20 rounded-lg flex items-center justify-center">
+                                                <LanguagesIcon className="size-3 text-indigo-400" />
+                                            </div>
+                                            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400">Live Translation to {transLang?.label}</span>
+                                        </div>
+                                        <div className="flex gap-1">
+                                            <div className="size-1 bg-indigo-500 rounded-full animate-pulse"></div>
+                                            <div className="size-1 bg-indigo-500 rounded-full animate-pulse [animation-delay:0.2s]"></div>
+                                            <div className="size-1 bg-indigo-500 rounded-full animate-pulse [animation-delay:0.4s]"></div>
+                                        </div>
                                     </div>
-                                    <p className="text-xs sm:text-sm text-slate-300 font-bold italic truncate w-full">"{translatedPreview}"</p>
+                                    <p className="text-sm text-slate-200 font-bold italic leading-relaxed">
+                                        {translatedPreview}
+                                    </p>
                                 </div>
                             </div>
                         )}
@@ -778,20 +790,44 @@ const AiRobotShell = () => {
                                     placeholder={voiceState === 'listening' ? "Listening..." : "Message..."}
                                     className="input bg-transparent border-none outline-none focus:outline-none flex-1 text-white placeholder:text-slate-600 px-4 sm:px-8 font-bold text-xs sm:text-sm tracking-wide min-w-0"
                                 />
-                                <div className="flex items-center gap-1.5 sm:gap-3 pr-1 sm:pr-4 border-l border-white/10 ml-1 sm:ml-4 shrink-0">
+                                <div className="flex items-center gap-1.5 sm:gap-3 pr-2 sm:pr-4 border-l border-white/10 ml-1 sm:ml-4 shrink-0">
                                     <div className="dropdown dropdown-top dropdown-end">
-                                        <label tabIndex={0} className="btn btn-ghost btn-xs text-[8px] sm:text-[9px] font-black tracking-widest text-slate-500 hover:text-primary p-0 h-auto uppercase">
-                                            {transLang ? transLang.label.slice(0, 3) : "Nat"}
+                                        <label tabIndex={0} className={`btn btn-ghost btn-xs h-9 sm:h-11 px-3 sm:px-4 flex items-center gap-2 rounded-full transition-all border border-transparent ${transLang ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30' : 'text-slate-500 hover:bg-white/5'}`}>
+                                            <LanguagesIcon className={`size-3.5 sm:size-4 ${transLang ? 'animate-pulse' : ''}`} />
+                                            <span className="text-[9px] sm:text-[10px] font-black tracking-widest uppercase hidden xs:inline">
+                                                {transLang ? transLang.label.slice(0, 3) : "Translate"}
+                                            </span>
                                         </label>
-                                        <ul tabIndex={0} className="dropdown-content z-30 menu p-2 shadow-2xl bg-slate-900 border border-white/10 rounded-xl w-36 sm:w-44 mb-4">
-                                            <li><button onClick={() => setTransLang(null)} className="text-[9px] font-black py-3 uppercase">Direct</button></li>
-                                            <div className="divider my-0 opacity-10"></div>
-                                            {TRANSLATION_LANGUAGES.slice(0, 10).map((l) => (
-                                                <li key={l.code}><button onClick={() => setTransLang(l)} className="text-[9px] font-black py-3 uppercase truncate">{l.label}</button></li>
-                                            ))}
+                                        <ul tabIndex={0} className="dropdown-content z-[70] menu p-2 shadow-2xl bg-slate-900 border border-white/10 rounded-2xl w-48 sm:w-56 mb-4 animate-in fade-in slide-in-from-bottom-2 duration-200 overflow-hidden">
+                                            <div className="px-4 py-3 mb-2 border-b border-white/5">
+                                                <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500">Language Mode</h3>
+                                            </div>
+                                            <li>
+                                                <button onClick={() => setTransLang(null)} className={`text-[10px] font-bold py-3 uppercase flex items-center justify-between ${!transLang ? 'bg-indigo-500 text-white' : 'hover:bg-white/5'}`}>
+                                                    <span>Natural (OFF)</span>
+                                                    {!transLang && <CheckIcon className="size-3" />}
+                                                </button>
+                                            </li>
+                                            <div className="divider my-0 opacity-5"></div>
+                                            <div className="max-h-60 overflow-y-auto custom-scrollbar">
+                                                {TRANSLATION_LANGUAGES.map((l) => (
+                                                    <li key={l.code}>
+                                                        <button onClick={() => setTransLang(l)} className={`text-[10px] font-bold py-3 uppercase flex items-center justify-between ${transLang?.code === l.code ? 'bg-indigo-500 text-white' : 'hover:bg-white/5'}`}>
+                                                            <span>{l.label}</span>
+                                                            {transLang?.code === l.code && <CheckIcon className="size-3" />}
+                                                        </button>
+                                                    </li>
+                                                ))}
+                                            </div>
                                         </ul>
                                     </div>
-                                    <button onClick={() => handleSend()} disabled={!inputText.trim() || isTyping} className="btn btn-primary btn-circle size-9 sm:size-11 shadow-lg ring-2 sm:ring-4 ring-primary/20 hover:scale-105 transition-transform shrink-0">
+                                    <button
+                                        onClick={() => handleSend()}
+                                        disabled={!inputText.trim() || isTyping}
+                                        className={`btn btn-circle size-9 sm:size-11 shadow-lg border-none transition-all duration-500
+                                            ${transLang && inputText.trim() ? "bg-indigo-600 ring-4 ring-indigo-500/20 hover:scale-110 shadow-indigo-500/40" : "btn-primary ring-4 ring-primary/20 hover:scale-105"}
+                                        `}
+                                    >
                                         {isTyping ? <Loader2Icon className="size-4 sm:size-5 animate-spin" /> : <SendIcon className="size-4 sm:size-5" />}
                                     </button>
                                 </div>
