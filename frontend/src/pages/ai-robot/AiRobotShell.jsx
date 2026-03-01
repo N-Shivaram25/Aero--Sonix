@@ -118,8 +118,18 @@ const AiRobotShell = () => {
         scrollToBottom();
     }, [messages, isTyping, translatedPreview]);
 
+    const [isTranslating, setIsTranslating] = useState(false);
+
     useEffect(() => {
-        if (transLang && inputText.trim()) {
+        // Only translate if we have a target language and text that isn't already what we just translated
+        if (transLang && inputText.trim() && inputText !== translatedPreview) {
+
+            // Simple check: don't auto-translate if the text already contains characters from the target language's range
+            // (This is a simplified check, but helps prevent immediate re-translation)
+            const isLikelyAlreadyTranslated = /[\u0900-\u0DFF]/.test(inputText);
+            if (isLikelyAlreadyTranslated && inputText.length > 5) return;
+
+            setIsTranslating(true);
             const timer = setTimeout(async () => {
                 try {
                     const res = await aiRobotTranslate({
@@ -127,20 +137,25 @@ const AiRobotShell = () => {
                         targetLanguageCode: transLang.code,
                         sourceLanguageCode: "en-IN"
                     });
-                    if (res.translatedText) {
+                    if (res.translatedText && res.translatedText !== inputText) {
                         setTranslatedPreview(res.translatedText);
-                        // Auto-fill input with translated text for direct chat
+                        // Auto-fill input with translated text
                         setInputText(res.translatedText);
                     }
-                } catch (err) { }
-            }, 800); // Slightly longer delay to avoid flickering while typing
+                } catch (err) {
+                    console.error("Translation error:", err);
+                } finally {
+                    setIsTranslating(false);
+                }
+            }, 1000); // 1s delay to let user finish typing
             return () => clearTimeout(timer);
-        } else {
+        } else if (!inputText.trim()) {
             setTranslatedPreview("");
         }
     }, [inputText, transLang]);
 
     const handleCopyText = (text) => {
+        if (!text) return;
         navigator.clipboard.writeText(text);
         toast.success("Copied to clipboard");
     };
@@ -800,7 +815,7 @@ const AiRobotShell = () => {
                                 </button>
                             </div>
 
-                            <div className="flex-1 flex bg-slate-900/80 border border-white/5 p-1 rounded-full shadow-2xl focus-within:ring-2 ring-primary/30 transition-all overflow-hidden">
+                            <div className="flex-1 flex bg-slate-900/80 border border-white/5 p-1 rounded-full shadow-2xl focus-within:ring-2 ring-primary/30 transition-all relative">
                                 <input
                                     type="text"
                                     value={inputText}
@@ -817,30 +832,32 @@ const AiRobotShell = () => {
                                                 {transLang ? transLang.label.slice(0, 3) : "Translate"}
                                             </span>
                                         </div>
-                                        <ul tabIndex={0} className="dropdown-content z-[100] menu p-2 shadow-2xl bg-slate-900 border border-white/10 rounded-2xl w-48 sm:w-56 mb-4 animate-in fade-in slide-in-from-bottom-2 duration-200 overflow-hidden translate-y-[-10px]">
-                                            <div className="px-4 py-3 mb-2 border-b border-white/5">
-                                                <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500 font-mono">NEURAL LINK SETTINGS</h3>
+                                        <ul tabIndex={0} className="dropdown-content z-[250] menu p-2 shadow-2xl bg-slate-900 border border-white/10 rounded-2xl w-56 sm:w-64 mb-6 animate-in fade-in slide-in-from-bottom-4 duration-300 overflow-hidden shadow-indigo-500/20 translate-y-[-10px]">
+                                            <div className="px-5 py-4 mb-2 border-b border-white/5 bg-indigo-500/5 rounded-t-xl">
+                                                <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400 font-mono flex items-center gap-2">
+                                                    <div className="size-1.5 bg-indigo-500 rounded-full animate-pulse"></div>
+                                                    Neural Translation
+                                                </h3>
                                             </div>
                                             <li>
-                                                <button onClick={() => setTransLang(null)} className={`text-[10px] font-black py-3 uppercase flex items-center justify-between mx-1 rounded-xl transition-all ${!transLang ? 'bg-primary text-white shadow-lg shadow-primary/20' : 'hover:bg-white/5'}`}>
-                                                    <span>Direct Mode (OFF)</span>
-                                                    {!transLang && <CheckIcon className="size-3" />}
+                                                <button onClick={() => { setTransLang(null); document.activeElement?.blur(); }} className={`text-[10px] font-black py-4 uppercase flex items-center justify-between mx-1 rounded-xl transition-all ${!transLang ? 'bg-primary text-white shadow-lg shadow-primary/20' : 'hover:bg-white/5'}`}>
+                                                    <span>Direct (OFF)</span>
+                                                    {!transLang && <CheckIcon className="size-4" />}
                                                 </button>
                                             </li>
-                                            <div className="divider my-0 opacity-5"></div>
-                                            <div className="max-h-64 overflow-y-auto custom-scrollbar px-1">
+                                            <div className="divider my-1 opacity-5"></div>
+                                            <div className="max-h-72 overflow-y-auto custom-scrollbar px-1">
                                                 {TRANSLATION_LANGUAGES.map((l) => (
-                                                    <li key={l.code} className="my-0.5">
+                                                    <li key={l.code} className="my-1">
                                                         <button
                                                             onClick={() => {
                                                                 setTransLang(l);
-                                                                // Close dropdown by blurring active element
-                                                                document.activeElement.blur();
+                                                                document.activeElement?.blur();
                                                             }}
-                                                            className={`text-[10px] font-black py-3 uppercase flex items-center justify-between rounded-xl transition-all ${transLang?.code === l.code ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'hover:bg-white/5'}`}
+                                                            className={`text-[10px] font-black py-4 uppercase flex items-center justify-between rounded-xl transition-all ${transLang?.code === l.code ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/40' : 'hover:bg-white/10'}`}
                                                         >
                                                             <span>{l.label}</span>
-                                                            {transLang?.code === l.code && <CheckIcon className="size-3" />}
+                                                            {transLang?.code === l.code && <CheckIcon className="size-4" />}
                                                         </button>
                                                     </li>
                                                 ))}
@@ -849,12 +866,12 @@ const AiRobotShell = () => {
                                     </div>
                                     <button
                                         onClick={() => handleSend()}
-                                        disabled={!inputText.trim() || isTyping}
+                                        disabled={!inputText.trim() || isTyping || isTranslating}
                                         className={`btn btn-circle size-9 sm:size-11 shadow-lg border-none transition-all duration-500
                                             ${transLang && inputText.trim() ? "bg-indigo-600 ring-4 ring-indigo-500/20 hover:scale-110 shadow-indigo-500/40" : "btn-primary ring-4 ring-primary/20 hover:scale-105"}
                                         `}
                                     >
-                                        {isTyping ? <Loader2Icon className="size-4 sm:size-5 animate-spin" /> : <SendIcon className="size-4 sm:size-5" />}
+                                        {(isTyping || isTranslating) ? <Loader2Icon className="size-4 sm:size-5 animate-spin" /> : <SendIcon className="size-4 sm:size-5" />}
                                     </button>
                                 </div>
                             </div>
