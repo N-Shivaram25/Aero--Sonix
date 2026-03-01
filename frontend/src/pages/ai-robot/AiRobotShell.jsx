@@ -24,7 +24,8 @@ import {
     EyeIcon,
     EyeOffIcon,
     ArrowLeftIcon,
-    LanguagesIcon
+    LanguagesIcon,
+    CopyIcon
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -126,14 +127,23 @@ const AiRobotShell = () => {
                         targetLanguageCode: transLang.code,
                         sourceLanguageCode: "en-IN"
                     });
-                    setTranslatedPreview(res.translatedText || "");
+                    if (res.translatedText) {
+                        setTranslatedPreview(res.translatedText);
+                        // Auto-fill input with translated text for direct chat
+                        setInputText(res.translatedText);
+                    }
                 } catch (err) { }
-            }, 500);
+            }, 800); // Slightly longer delay to avoid flickering while typing
             return () => clearTimeout(timer);
         } else {
             setTranslatedPreview("");
         }
     }, [inputText, transLang]);
+
+    const handleCopyText = (text) => {
+        navigator.clipboard.writeText(text);
+        toast.success("Copied to clipboard");
+    };
 
     const fetchConversations = async () => {
         try {
@@ -739,10 +749,19 @@ const AiRobotShell = () => {
                                             </div>
                                             <span className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400">Live Translation to {transLang?.label}</span>
                                         </div>
-                                        <div className="flex gap-1">
-                                            <div className="size-1 bg-indigo-500 rounded-full animate-pulse"></div>
-                                            <div className="size-1 bg-indigo-500 rounded-full animate-pulse [animation-delay:0.2s]"></div>
-                                            <div className="size-1 bg-indigo-500 rounded-full animate-pulse [animation-delay:0.4s]"></div>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => handleCopyText(translatedPreview)}
+                                                className="btn btn-ghost btn-xs btn-circle text-indigo-400 hover:bg-indigo-500/20"
+                                                title="Copy translation"
+                                            >
+                                                <CopyIcon className="size-3" />
+                                            </button>
+                                            <div className="flex gap-1">
+                                                <div className="size-1 bg-indigo-500 rounded-full animate-pulse"></div>
+                                                <div className="size-1 bg-indigo-500 rounded-full animate-pulse [animation-delay:0.2s]"></div>
+                                                <div className="size-1 bg-indigo-500 rounded-full animate-pulse [animation-delay:0.4s]"></div>
+                                            </div>
                                         </div>
                                     </div>
                                     <p className="text-sm text-slate-200 font-bold italic leading-relaxed">
@@ -792,27 +811,34 @@ const AiRobotShell = () => {
                                 />
                                 <div className="flex items-center gap-1.5 sm:gap-3 pr-2 sm:pr-4 border-l border-white/10 ml-1 sm:ml-4 shrink-0">
                                     <div className="dropdown dropdown-top dropdown-end">
-                                        <label tabIndex={0} className={`btn btn-ghost btn-xs h-9 sm:h-11 px-3 sm:px-4 flex items-center gap-2 rounded-full transition-all border border-transparent ${transLang ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30' : 'text-slate-500 hover:bg-white/5'}`}>
+                                        <div tabIndex={0} role="button" className={`btn btn-ghost btn-xs h-9 sm:h-11 px-3 sm:px-4 flex items-center gap-2 rounded-full transition-all border border-transparent ${transLang ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30' : 'text-slate-500 hover:bg-white/5'}`}>
                                             <LanguagesIcon className={`size-3.5 sm:size-4 ${transLang ? 'animate-pulse' : ''}`} />
                                             <span className="text-[9px] sm:text-[10px] font-black tracking-widest uppercase hidden xs:inline">
                                                 {transLang ? transLang.label.slice(0, 3) : "Translate"}
                                             </span>
-                                        </label>
-                                        <ul tabIndex={0} className="dropdown-content z-[70] menu p-2 shadow-2xl bg-slate-900 border border-white/10 rounded-2xl w-48 sm:w-56 mb-4 animate-in fade-in slide-in-from-bottom-2 duration-200 overflow-hidden">
+                                        </div>
+                                        <ul tabIndex={0} className="dropdown-content z-[100] menu p-2 shadow-2xl bg-slate-900 border border-white/10 rounded-2xl w-48 sm:w-56 mb-4 animate-in fade-in slide-in-from-bottom-2 duration-200 overflow-hidden translate-y-[-10px]">
                                             <div className="px-4 py-3 mb-2 border-b border-white/5">
-                                                <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500">Language Mode</h3>
+                                                <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500 font-mono">NEURAL LINK SETTINGS</h3>
                                             </div>
                                             <li>
-                                                <button onClick={() => setTransLang(null)} className={`text-[10px] font-bold py-3 uppercase flex items-center justify-between ${!transLang ? 'bg-indigo-500 text-white' : 'hover:bg-white/5'}`}>
-                                                    <span>Natural (OFF)</span>
+                                                <button onClick={() => setTransLang(null)} className={`text-[10px] font-black py-3 uppercase flex items-center justify-between mx-1 rounded-xl transition-all ${!transLang ? 'bg-primary text-white shadow-lg shadow-primary/20' : 'hover:bg-white/5'}`}>
+                                                    <span>Direct Mode (OFF)</span>
                                                     {!transLang && <CheckIcon className="size-3" />}
                                                 </button>
                                             </li>
                                             <div className="divider my-0 opacity-5"></div>
-                                            <div className="max-h-60 overflow-y-auto custom-scrollbar">
+                                            <div className="max-h-64 overflow-y-auto custom-scrollbar px-1">
                                                 {TRANSLATION_LANGUAGES.map((l) => (
-                                                    <li key={l.code}>
-                                                        <button onClick={() => setTransLang(l)} className={`text-[10px] font-bold py-3 uppercase flex items-center justify-between ${transLang?.code === l.code ? 'bg-indigo-500 text-white' : 'hover:bg-white/5'}`}>
+                                                    <li key={l.code} className="my-0.5">
+                                                        <button
+                                                            onClick={() => {
+                                                                setTransLang(l);
+                                                                // Close dropdown by blurring active element
+                                                                document.activeElement.blur();
+                                                            }}
+                                                            className={`text-[10px] font-black py-3 uppercase flex items-center justify-between rounded-xl transition-all ${transLang?.code === l.code ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'hover:bg-white/5'}`}
+                                                        >
                                                             <span>{l.label}</span>
                                                             {transLang?.code === l.code && <CheckIcon className="size-3" />}
                                                         </button>
