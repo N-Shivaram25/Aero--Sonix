@@ -83,6 +83,7 @@ const AiRobotShell = () => {
 
     const [voiceState, setVoiceState] = useState("idle");
     const [lastError, setLastError] = useState("");
+    const [englishInput, setEnglishInput] = useState(""); // Stores user's English typing
 
     const scrollRef = useRef(null);
     const recorderRef = useRef(null);
@@ -121,38 +122,35 @@ const AiRobotShell = () => {
     const [isTranslating, setIsTranslating] = useState(false);
 
     useEffect(() => {
-        // Only translate if we have a target language and text that isn't already what we just translated
-        if (transLang && inputText.trim() && inputText !== translatedPreview) {
-
-            // Simple check: don't auto-translate if the text already contains characters from the target language's range
-            // (This is a simplified check, but helps prevent immediate re-translation)
-            const isLikelyAlreadyTranslated = /[\u0900-\u0DFF]/.test(inputText);
-            if (isLikelyAlreadyTranslated && inputText.length > 5) return;
-
+        // Parallel Instant Translation Logic
+        if (transLang && englishInput.trim()) {
             setIsTranslating(true);
             const timer = setTimeout(async () => {
                 try {
+                    // Force strict native script translation
                     const res = await aiRobotTranslate({
-                        text: inputText,
+                        text: englishInput,
                         targetLanguageCode: transLang.code,
                         sourceLanguageCode: "en-IN"
                     });
-                    if (res.translatedText && res.translatedText !== inputText) {
+
+                    if (res.translatedText) {
                         setTranslatedPreview(res.translatedText);
-                        // Auto-fill input with translated text
+                        // Parallel update: reflect native script in the actual state used for sending
                         setInputText(res.translatedText);
                     }
                 } catch (err) {
-                    console.error("Translation error:", err);
+                    console.error("Neural Translation Sync Failed:", err);
                 } finally {
                     setIsTranslating(false);
                 }
-            }, 1000); // 1s delay to let user finish typing
+            }, 600); // Faster debounce for "parallel" feeling
             return () => clearTimeout(timer);
-        } else if (!inputText.trim()) {
+        } else if (!englishInput.trim() && transLang) {
             setTranslatedPreview("");
+            setInputText("");
         }
-    }, [inputText, transLang]);
+    }, [englishInput, transLang]);
 
     const handleCopyText = (text) => {
         if (!text) return;
@@ -267,6 +265,7 @@ const AiRobotShell = () => {
         const userMsg = { role: "user", text: textToSend, timestamp: new Date() };
         setMessages((prev) => [...prev, userMsg]);
         setInputText("");
+        setEnglishInput(""); // Clear both
         setTranslatedPreview("");
         setIsTyping(true);
 
@@ -818,10 +817,13 @@ const AiRobotShell = () => {
                             <div className="flex-1 flex bg-slate-900/80 border border-white/5 p-1 rounded-full shadow-2xl focus-within:ring-2 ring-primary/30 transition-all relative">
                                 <input
                                     type="text"
-                                    value={inputText}
-                                    onChange={(e) => setInputText(e.target.value)}
+                                    value={transLang ? englishInput : inputText}
+                                    onChange={(e) => {
+                                        if (transLang) setEnglishInput(e.target.value);
+                                        else setInputText(e.target.value);
+                                    }}
                                     onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                                    placeholder={voiceState === 'listening' ? "Listening..." : "Message..."}
+                                    placeholder={voiceState === 'listening' ? "Listening..." : "Neural Typing..."}
                                     className="input bg-transparent border-none outline-none focus:outline-none flex-1 text-white placeholder:text-slate-600 px-4 sm:px-8 font-bold text-xs sm:text-sm tracking-wide min-w-0"
                                 />
                                 <div className="flex items-center gap-1.5 sm:gap-3 pr-2 sm:pr-4 border-l border-white/10 ml-1 sm:ml-4 shrink-0">
